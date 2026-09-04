@@ -1,0 +1,92 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  firmware:
+    runs-on: ubuntu-latest
+    container:
+      image: espressif/idf:v5.5.5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch Espressif Zig
+        run: |
+          mkdir -p .tools/zig-xtensa
+          curl -sSL https://github.com/kassane/zig-espressif-bootstrap/releases/download/0.16.0-xtensa/zig-relsafe-x86_64-linux-musl-baseline.tar.xz \
+            | tar -xJ -C .tools/zig-xtensa --strip-components=1
+      - name: Build
+        shell: bash
+        run: |
+          . /opt/esp/idf/export.sh
+          export ZIG="$PWD/.tools/zig-xtensa/zig"
+          cd firmware && idf.py build
+      - name: Assemble site
+        run: scripts/make-site.sh "${GITHUB_REF_NAME}" firmware/build _site
+      - uses: actions/upload-artifact@v4
+        with:
+          name: site
+          path: _site
+
+  host:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - run: zig build test --summary all
+      - run: zig build -Doptimize=ReleaseSafe -Dtarget=x86_64-linux-musl
+      - uses: actions/upload-artifact@v4
+        with:
+          name: host
+          path: zig-out/bin/
+
+  release:
+    needs: [firmware, host]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: site
+          path: _site
+      - uses: actions/download-artifact@v4
+        with:
+          name: host
+          path: host
+      - name: Package
+        run: |
+          cp _site/firmware/*.bin _site/manifest.json .
+          tar -C host -czf hcibridged-x86_64-linux-musl.tar.gz hcibridged hcibridge-sim
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            bootloader.bin
+            partition-table.bin
+            esp-hci-bridge.bin
+            manifest.json
+            hcibridged-x86_64-linux-musl.tar.gz
+          generate_release_notes: true
+
+  pages:
+    needs: release
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: site
+          path: _site
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deploy
+        uses: actions/deploy-pages@v4

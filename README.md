@@ -93,6 +93,24 @@ PORT=/dev/ttyUSB0 scripts/firmware.sh flash
 PORT=/dev/ttyUSB0 scripts/firmware.sh monitor
 ```
 
+### Flash from the browser
+
+Every tag `v*` builds a release and publishes a flashing page on GitHub
+Pages. Open it in Chromium, Chrome or Edge, click Install, pick the CH340
+port. The page ships the exact binaries of that release, so it always flashes
+the latest one. Local preview:
+
+```
+scripts/make-site.sh dev firmware/build _site
+python3 -m http.server -d _site 8000     # http://localhost:8000
+```
+
+Cut a release:
+
+```
+git tag v0.1.0 && git push origin v0.1.0
+```
+
 Build without docker: have ESP-IDF 5.5 exported and `ZIG` pointing at the
 Espressif Zig, then `cd firmware && idf.py build`.
 

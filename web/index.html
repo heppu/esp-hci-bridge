@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>esp-hci-bridge</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 16px/1.5 system-ui, sans-serif; max-width: 720px; margin: 3rem auto; padding: 0 1rem; }
+  h1 { margin-bottom: 0; }
+  .sub { color: #888; margin-top: 0; }
+  .card { border: 1px solid #8884; border-radius: 8px; padding: 1rem 1.25rem; margin: 1.5rem 0; }
+  code, pre { font-family: ui-monospace, monospace; background: #8882; padding: 0.1rem 0.3rem; border-radius: 4px; }
+  pre { padding: 0.75rem; overflow-x: auto; }
+  esp-web-install-button { --esp-tools-button-color: #2b6cb0; --esp-tools-button-text-color: #fff; }
+  .warn { border-color: #d69e2e; }
+  table { border-collapse: collapse; }
+  td { padding: 0.2rem 1rem 0.2rem 0; }
+</style>
+<script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+</head>
+<body>
+<h1>esp-hci-bridge</h1>
+<p class="sub">Olimex ESP32-POE as a remote Bluetooth controller over Ethernet.</p>
+
+<div class="card">
+  <p>Firmware <strong id="version">…</strong>, built <span id="date">…</span>.</p>
+  <esp-web-install-button manifest="manifest.json">
+    <span slot="unsupported">Needs Chromium, Chrome or Edge. Firefox has no Web Serial.</span>
+    <span slot="not-allowed">Open this page over HTTPS or localhost.</span>
+  </esp-web-install-button>
+  <p>Plug the board's micro USB into this computer, click Install, pick the CH340 port. The dialog also has a serial console for watching boot logs.</p>
+</div>
+
+<div class="card warn">
+  <p><strong>Non ISO ESP32-POE:</strong> unplug PoE before connecting USB. Olimex warns the missing isolation can damage the PC.</p>
+  <p><strong>Linux:</strong> your user needs access to <code>/dev/ttyUSB0</code>, usually group <code>dialout</code> or <code>uucp</code>. Flatpak browsers need <code>--device=all</code>.</p>
+</div>
+
+<div class="card">
+  <p>After flashing, on the PC:</p>
+<pre>modprobe hci_vhci
+hcibridged --host esp-hci-bridge
+bluetoothctl list</pre>
+  <p>Files in this release:</p>
+  <table>
+    <tr><td><a href="firmware/bootloader.bin">bootloader.bin</a></td><td>0x1000</td></tr>
+    <tr><td><a href="firmware/partition-table.bin">partition-table.bin</a></td><td>0x8000</td></tr>
+    <tr><td><a href="firmware/esp-hci-bridge.bin">esp-hci-bridge.bin</a></td><td>0x10000</td></tr>
+  </table>
+  <p><a href="https://github.com/heppu/esp-hci-bridge">Source and releases</a></p>
+</div>
+
+<script>
+  fetch('manifest.json').then(r => r.json()).then(m => {
+    document.getElementById('version').textContent = m.version;
+    document.getElementById('date').textContent = m.built || '';
+  }).catch(() => {});
+</script>
+</body>
+</html>
