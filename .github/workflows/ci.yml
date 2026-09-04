@@ -1,0 +1,43 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  host:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - run: zig fmt --check build.zig common host firmware/main
+      - run: zig build test --summary all
+      - run: zig build -Doptimize=ReleaseSafe
+
+  firmware:
+    runs-on: ubuntu-latest
+    container:
+      image: espressif/idf:v5.5.5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch Espressif Zig
+        run: |
+          mkdir -p .tools/zig-xtensa
+          curl -sSL https://github.com/kassane/zig-espressif-bootstrap/releases/download/0.16.0-xtensa/zig-relsafe-x86_64-linux-musl-baseline.tar.xz \
+            | tar -xJ -C .tools/zig-xtensa --strip-components=1
+      - name: Build
+        shell: bash
+        run: |
+          . /opt/esp/idf/export.sh
+          export ZIG="$PWD/.tools/zig-xtensa/zig"
+          cd firmware && idf.py build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: |
+            firmware/build/esp-hci-bridge.bin
+            firmware/build/bootloader/bootloader.bin
+            firmware/build/partition_table/partition-table.bin
+            firmware/build/flash_args

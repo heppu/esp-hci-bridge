@@ -1,0 +1,27 @@
+menu "HCI bridge"
+
+    config BRIDGE_TCP_PORT
+        int "TCP port for the HCI stream"
+        default 4444
+
+    config BRIDGE_HOSTNAME
+        string "DHCP hostname"
+        default "esp-hci-bridge"
+
+    config BRIDGE_ETH_MDC_GPIO
+        int "Ethernet PHY MDC GPIO"
+        default 23
+
+    config BRIDGE_ETH_MDIO_GPIO
+        int "Ethernet PHY MDIO GPIO"
+        default 18
+
+    config BRIDGE_ETH_PHY_POWER_GPIO
+        int "Ethernet PHY power/reset GPIO (-1 to disable)"
+        default 12
+
+    config BRIDGE_ETH_PHY_ADDR
+        int "Ethernet PHY address"
+        default 0
+
+endmenu

@@ -1,0 +1,13 @@
+.{
+    .name = .esp_hci_bridge,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.16.0",
+    .fingerprint = 0x74aa55c89f621659,
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "common",
+        "host",
+        "firmware",
+    },
+}

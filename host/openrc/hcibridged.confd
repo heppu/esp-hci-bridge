@@ -1,0 +1,6 @@
+# /etc/conf.d/hcibridged
+BRIDGE_HOST="esp-hci-bridge"
+BRIDGE_PORT="4444"
+BRIDGE_VHCI="/dev/vhci"
+# Extra flags, e.g. "--reconnect-ms 500"
+BRIDGE_ARGS=""

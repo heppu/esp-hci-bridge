@@ -1,0 +1,21 @@
+#!/sbin/openrc-run
+# Attaches the remote ESP32 Bluetooth controller to the local bluez stack.
+
+description="ESP32 HCI bridge client"
+command="/usr/local/bin/hcibridged"
+command_args="--host ${BRIDGE_HOST:-esp-hci-bridge} --port ${BRIDGE_PORT:-4444} --vhci ${BRIDGE_VHCI:-/dev/vhci} ${BRIDGE_ARGS:-}"
+supervisor="supervise-daemon"
+respawn_delay=2
+respawn_max=0
+output_log="/var/log/hcibridged.log"
+error_log="/var/log/hcibridged.log"
+
+depend() {
+    need net
+    before bluetooth
+}
+
+start_pre() {
+    modprobe hci_vhci || return 1
+    checkpath --file --mode 0640 "$output_log"
+}
