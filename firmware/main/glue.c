@@ -266,6 +266,7 @@ static void ip_event(void *arg, esp_event_base_t base, int32_t id, void *data)
     const ip_event_got_ip_t *ev = data;
     ESP_LOGI(TAG, "ip " IPSTR " mask " IPSTR " gw " IPSTR,
              IP2STR(&ev->ip_info.ip), IP2STR(&ev->ip_info.netmask), IP2STR(&ev->ip_info.gw));
+    ota_confirm();
 }
 
 static void eth_init(void)
@@ -313,4 +314,5 @@ void app_main(void)
     eth_init();
     bt_init();
     bridge_start();
+    ota_init();
 }

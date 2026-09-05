@@ -103,6 +103,17 @@ export fn bridge_on_controller_packet(data: [*]u8, len: u16) c_int {
     return 0;
 }
 
+export fn bridge_stats_json(buf: [*]u8, len: usize) usize {
+    const s = state.stats;
+    const out = std.fmt.bufPrintZ(buf[0..len], "{{\"to_controller\":{d},\"to_host\":{d},\"connections\":{d},\"connected\":{},\"drop_no_host\":{d},\"drop_overflow\":{d},\"drop_stale\":{d},\"drop_busy\":{d}}}", .{
+        s.to_controller, s.to_host, s.connections, state.client_fd.load(.acquire) >= 0, s.dropped_no_host, s.dropped_overflow, s.dropped_stale, s.dropped_controller_busy,
+    }) catch {
+        buf[0] = 0;
+        return 0;
+    };
+    return out.len;
+}
+
 export fn bridge_on_controller_send_available() void {
     if (state.send_sem) |sem| glue.glue_sem_give(sem);
 }

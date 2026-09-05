@@ -93,6 +93,19 @@ PORT=/dev/ttyUSB0 scripts/firmware.sh flash
 PORT=/dev/ttyUSB0 scripts/firmware.sh monitor
 ```
 
+### Update over Ethernet
+
+After the first USB flash every update can go over the network:
+
+```
+scripts/ota.sh 172.16.135.242                       # uses firmware/build
+scripts/ota.sh 172.16.135.242 path/to/esp-hci-bridge.bin
+curl http://172.16.135.242/                          # version, address, stats
+```
+
+Two OTA slots with bootloader rollback. A new image is confirmed once it
+gets an IP address, otherwise the next reset boots the previous one.
+
 ### Flash from the browser
 
 Every tag `v*` builds a release and publishes a flashing page on GitHub
