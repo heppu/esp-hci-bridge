@@ -59,9 +59,11 @@ const Stats = struct {
 const State = struct {
     listen_fd: c_int = -1,
     client_fd: std.atomic.Value(i32) = .init(-1),
-    /// Bumped on every accepted connection so the tx task can discard bytes
-    /// that belonged to a previous host.
-    generation: std.atomic.Value(u32) = .init(0),
+    /// Handshake so the rx task can drain the stream buffer while the tx
+    /// task is parked, otherwise bytes of the previous host could leak into
+    /// the new connection.
+    tx_pause: std.atomic.Value(bool) = .init(false),
+    tx_idle: std.atomic.Value(bool) = .init(false),
     sb: ?*anyopaque = null,
     send_sem: ?*anyopaque = null,
     stats: Stats = .{},
@@ -165,9 +167,11 @@ fn acceptClient(re: *h4.Reassembler) void {
         glue.glue_close(old);
     }
     re.reset();
+    state.tx_pause.store(true, .release);
+    while (!state.tx_idle.load(.acquire)) glue.glue_delay_ms(1);
     drainStreamBuffer();
-    _ = state.generation.fetchAdd(1, .acq_rel);
     state.client_fd.store(new_fd, .release);
+    state.tx_pause.store(false, .release);
     state.stats.connections +%= 1;
     log.info("host connected", .{});
 }
@@ -209,11 +213,17 @@ fn sendToController(pkt: []const u8) void {
 fn txTask(_: ?*anyopaque) callconv(.c) void {
     const sb = state.sb orelse @panic("no stream buffer");
     while (true) {
-        const gen = state.generation.load(.acquire);
-        const client = state.client_fd.load(.acquire);
+        if (state.tx_pause.load(.acquire)) {
+            state.tx_idle.store(true, .release);
+            glue.glue_delay_ms(2);
+            continue;
+        }
+        state.tx_idle.store(false, .release);
         const n = glue.glue_sb_recv(sb, &tx_chunk, tx_chunk.len, 100);
         if (n == 0) continue;
-        if (client < 0 or state.generation.load(.acquire) != gen) {
+        // Read the client after the wait, a host may have connected meanwhile.
+        const client = state.client_fd.load(.acquire);
+        if (client < 0) {
             state.stats.dropped_stale +%= 1;
             continue;
         }
