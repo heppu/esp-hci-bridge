@@ -26,6 +26,7 @@ jobs:
         run: |
           . /opt/esp/idf/export.sh
           export ZIG="$PWD/.tools/zig-xtensa/zig"
+          export PROJECT_VER="${GITHUB_REF_NAME}"
           cd firmware && idf.py build
       - name: Assemble site
         run: scripts/make-site.sh "${GITHUB_REF_NAME}" firmware/build _site
