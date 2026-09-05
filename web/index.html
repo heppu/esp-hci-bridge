@@ -42,12 +42,8 @@
 <pre>modprobe hci_vhci
 hcibridged --host esp-hci-bridge
 bluetoothctl list</pre>
-  <p>Files in this release:</p>
-  <table>
-    <tr><td><a href="firmware/bootloader.bin">bootloader.bin</a></td><td>0x1000</td></tr>
-    <tr><td><a href="firmware/partition-table.bin">partition-table.bin</a></td><td>0x8000</td></tr>
-    <tr><td><a href="firmware/esp-hci-bridge.bin">esp-hci-bridge.bin</a></td><td>0x10000</td></tr>
-  </table>
+  <p>Files in this release, with flash offsets for esptool:</p>
+  <table id="parts"></table>
   <p><a href="https://github.com/heppu/esp-hci-bridge">Source and releases</a></p>
 </div>
 
@@ -55,6 +51,13 @@ bluetoothctl list</pre>
   fetch('manifest.json').then(r => r.json()).then(m => {
     document.getElementById('version').textContent = m.version;
     document.getElementById('date').textContent = m.built || '';
+    const table = document.getElementById('parts');
+    for (const p of m.builds[0].parts) {
+      const row = table.insertRow();
+      const name = p.path.split('/').pop();
+      row.insertCell().innerHTML = `<a href="${p.path}">${name}</a>`;
+      row.insertCell().textContent = '0x' + p.offset.toString(16);
+    }
   }).catch(() => {});
 </script>
 </body>

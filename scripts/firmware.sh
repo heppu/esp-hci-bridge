@@ -15,6 +15,13 @@ if [ ! -x "$ZIG_DIR/zig" ]; then
     curl -sSL "$ZIG_URL" | tar -xJ -C "$ZIG_DIR" --strip-components=1
 fi
 
+# IDF only reads sdkconfig.defaults when creating sdkconfig, so a stale one
+# silently keeps old settings such as the partition table.
+if [ -f "$ROOT/firmware/sdkconfig" ] && [ "$ROOT/firmware/sdkconfig.defaults" -nt "$ROOT/firmware/sdkconfig" ]; then
+    echo "sdkconfig.defaults changed, regenerating sdkconfig"
+    rm -f "$ROOT/firmware/sdkconfig"
+fi
+
 DEVICE_ARGS=""
 if [ -n "${PORT:-}" ]; then
     # The container runs as the host user, who is often not in dialout.

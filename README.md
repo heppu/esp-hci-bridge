@@ -124,6 +124,10 @@ Cut a release:
 git tag v0.1.0 && git push origin v0.1.0
 ```
 
+After the partition table or other `sdkconfig.defaults` changes, the
+generated `firmware/sdkconfig` must go. The docker script handles that,
+otherwise `rm firmware/sdkconfig` before building.
+
 Build without docker: have ESP-IDF 5.5 exported and `ZIG` pointing at the
 Espressif Zig, then `cd firmware && idf.py build`.
 

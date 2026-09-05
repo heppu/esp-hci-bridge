@@ -1,6 +1,8 @@
 #!/bin/sh
 # Assembles the static flashing site: web/ plus firmware binaries and a
-# generated ESP Web Tools manifest. Usage: scripts/make-site.sh <version> <build dir> <out dir>
+# generated ESP Web Tools manifest. Offsets come from the build's flash_args
+# so the manifest always matches the partition table.
+# Usage: scripts/make-site.sh <version> <build dir> <out dir>
 set -eu
 VERSION=$1
 BUILD=$2
@@ -8,9 +10,16 @@ OUT=$3
 
 mkdir -p "$OUT/firmware"
 cp web/index.html "$OUT/"
-cp "$BUILD/bootloader/bootloader.bin" "$OUT/firmware/"
-cp "$BUILD/partition_table/partition-table.bin" "$OUT/firmware/"
-cp "$BUILD/esp-hci-bridge.bin" "$OUT/firmware/"
+
+parts=""
+while read -r offset file; do
+    case "$offset" in 0x*) ;; *) continue ;; esac
+    name=$(basename "$file")
+    cp "$BUILD/$file" "$OUT/firmware/$name"
+    dec=$(printf '%d' "$offset")
+    parts="$parts${parts:+,}
+        { \"path\": \"firmware/$name\", \"offset\": $dec }"
+done < "$BUILD/flash_args"
 
 cat > "$OUT/manifest.json" <<JSON
 {
@@ -21,10 +30,7 @@ cat > "$OUT/manifest.json" <<JSON
   "builds": [
     {
       "chipFamily": "ESP32",
-      "parts": [
-        { "path": "firmware/bootloader.bin", "offset": 4096 },
-        { "path": "firmware/partition-table.bin", "offset": 32768 },
-        { "path": "firmware/esp-hci-bridge.bin", "offset": 65536 }
+      "parts": [$parts
       ]
     }
   ]
