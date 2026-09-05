@@ -17,7 +17,9 @@ fi
 
 DEVICE_ARGS=""
 if [ -n "${PORT:-}" ]; then
-    DEVICE_ARGS="--device=$PORT"
+    # The container runs as the host user, who is often not in dialout.
+    # Pass the device's group in so the port is readable inside.
+    DEVICE_ARGS="--device=$PORT --group-add=$(stat -c %g "$PORT")"
 fi
 TTY_ARGS=""
 if [ -t 0 ]; then
