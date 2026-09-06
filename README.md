@@ -132,9 +132,9 @@ Manual run:
 
 ```
 sudo modprobe hci_vhci
-sudo hcibridged                 # discovery mode, finds all bridges
-sudo hcibridged --host 172.16.x.y   # or pin one board
-bluetoothctl list               # one controller per board
+sudo hcibridge run                    # discovery mode, finds all bridges
+sudo hcibridge run --host 172.16.x.y  # or pin one board
+bluetoothctl list                     # one controller per board
 ```
 
 The daemon reconnects forever. While the link is down it closes `/dev/vhci`
