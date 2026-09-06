@@ -70,8 +70,7 @@ this PC by exchanging a key, once, over the LAN:
 
 ```sh
 hcibridge list                 # find the board (KEY column says "no")
-sudo hcibridge claim <ip>      # pair it with this PC
-sudo rc-service hcibridged restart  # or: systemctl restart hcibridge
+sudo hcibridge claim <ip>      # pair it with this PC, the daemon picks it up by itself
 ```
 
 From then on the board only accepts this PC and the PC only trusts this board.
