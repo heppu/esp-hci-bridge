@@ -179,6 +179,14 @@ jobs:
           done
           cp cli/* release/
           chmod +x release/hcibridge-*
+          # versionless copies so releases/latest/download/<file> always resolves
+          VER="${GITHUB_REF_NAME#v}"
+          for f in release/hcibridge_"$VER"_*.deb release/hcibridge_"$VER"_*.apk; do
+            cp "$f" "${f/_${VER}_/_}"
+          done
+          for f in release/hcibridge-"$VER"-1.*.rpm; do
+            cp "$f" "${f/-${VER}-1./.}"
+          done
           cd release && sha256sum * > SHA256SUMS && cat SHA256SUMS
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
