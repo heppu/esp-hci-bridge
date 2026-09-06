@@ -17,7 +17,7 @@ fn envGet(ctx: ?*anyopaque, name: []const u8) ?[]const u8 {
 }
 
 /// Loads psk entries from the config (main + .d) and HCIBRIDGE_PSK. Caller deinit()s.
-fn loadKeys(io: Io, gpa: std.mem.Allocator, cfg_path: []const u8) !settings.Settings {
+pub fn loadKeys(io: Io, gpa: std.mem.Allocator, cfg_path: []const u8) !settings.Settings {
     var raw = config.loadRaw(gpa, io, cfg_path) catch |err| blk: {
         log.warn("config {s}: {s} (using defaults)", .{ cfg_path, @errorName(err) });
         break :blk config.Raw{ .arena = std.heap.ArenaAllocator.init(gpa) };
@@ -328,7 +328,7 @@ pub fn claim(io: Io, gpa: std.mem.Allocator, ip: []const u8, cfg_path: []const u
 
     if (writeFile(io, dropin, line)) {
         log.info("claimed {s} ({s}); key saved to {s}", .{ ip, info.bdaddr, dropin });
-        log.info("restart the service so it picks up the key: e.g. `rc-service hcibridged restart`", .{});
+        log.info("the running daemon picks the key up on the board's next announce", .{});
     } else |err| {
         log.warn("claimed {s} ({s}) but could not write {s}: {s}", .{ ip, info.bdaddr, dropin, @errorName(err) });
         var obuf: [256]u8 = undefined;

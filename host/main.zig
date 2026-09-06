@@ -163,18 +163,36 @@ const ClientCtx = struct {
     port: u16,
     vhci: []const u8,
     reconnect_ms: u32,
-    psk: auth.Psk,
+    psk: ?auth.Psk,
+    cfg_path: []const u8,
 };
 
 fn clientThread(ctx: *ClientCtx) void {
+    var warned = false;
     while (true) {
+        if (ctx.psk == null) {
+            // Key may appear later, when the user runs `hcibridge claim`.
+            if (cli.loadKeys(ctx.io, ctx.gpa, ctx.cfg_path)) |*fresh| {
+                defer @constCast(fresh).deinit();
+                ctx.psk = settings.lookupPsk(fresh.psk, ctx.host);
+            } else |_| {}
+            if (ctx.psk == null) {
+                if (!warned) log.err("no key for pinned board {s}: run `hcibridge claim {s}`", .{ ctx.host, ctx.host });
+                warned = true;
+                ctx.io.sleep(Io.Duration.fromMilliseconds(5000), .awake) catch {};
+                continue;
+            }
+            log.info("[{s}] key found", .{ctx.host});
+        }
         const addr = Io.net.IpAddress.resolve(ctx.io, ctx.host, ctx.port) catch |err| {
             log.warn("resolve {s}: {s}", .{ ctx.host, @errorName(err) });
             ctx.io.sleep(Io.Duration.fromMilliseconds(ctx.reconnect_ms), .awake) catch {};
             continue;
         };
-        _ = board.run(ctx.io, &addr, ctx.vhci, ctx.host, &ctx.psk, null) catch |err| {
+        _ = board.run(ctx.io, &addr, ctx.vhci, ctx.host, &ctx.psk.?, null) catch |err| {
             log.warn("[{s}] session ended: {s}", .{ ctx.host, @errorName(err) });
+            // A stale key is re-read on the next round instead of failing forever.
+            if (err == error.AuthFailed) ctx.psk = null;
         };
         ctx.io.sleep(Io.Duration.fromMilliseconds(ctx.reconnect_ms), .awake) catch {};
     }
@@ -238,18 +256,19 @@ fn runMode(io: Io, gpa: std.mem.Allocator, args: []const []const u8, env_map: *s
         const hp = splitHostPort(client, s.port);
         try pinned.append(gpa, hp.host);
         const psk = settings.lookupPsk(s.psk, hp.host) orelse
-            (if (s.psk.len == 1) settings.lookupPsk(s.psk, s.psk[0][0 .. std.mem.indexOfScalar(u8, s.psk[0], '=') orelse 0]) else null) orelse {
-            log.err("no key for pinned board {s}: run `hcibridge claim {s}`", .{ hp.host, hp.host });
-            return 2;
-        };
-        const ctx = try gpa.create(ClientCtx);
-        ctx.* = .{ .io = io, .gpa = gpa, .host = hp.host, .port = hp.port, .vhci = s.vhci, .reconnect_ms = s.reconnect_ms, .psk = psk };
+            (if (s.psk.len == 1) settings.lookupPsk(s.psk, s.psk[0][0 .. std.mem.indexOfScalar(u8, s.psk[0], '=') orelse 0]) else null);
         if (s.once and s.clients.len == 1 and !s.discovery) {
             // one-shot for scripting/tests
+            const key = psk orelse {
+                log.err("no key for pinned board {s}: run `hcibridge claim {s}`", .{ hp.host, hp.host });
+                return 2;
+            };
             const addr = try Io.net.IpAddress.resolve(io, hp.host, hp.port);
-            _ = board.run(io, &addr, s.vhci, hp.host, &psk, null) catch {};
+            _ = board.run(io, &addr, s.vhci, hp.host, &key, null) catch {};
             return 0;
         }
+        const ctx = try gpa.create(ClientCtx);
+        ctx.* = .{ .io = io, .gpa = gpa, .host = hp.host, .port = hp.port, .vhci = s.vhci, .reconnect_ms = s.reconnect_ms, .psk = psk, .cfg_path = cfg_path };
         const t = try std.Thread.spawn(.{}, clientThread, .{ctx});
         t.detach();
         log.info("pinned board {s}:{d}", .{ hp.host, hp.port });
@@ -265,6 +284,8 @@ fn runMode(io: Io, gpa: std.mem.Allocator, args: []const []const u8, env_map: *s
             .allow = s.allow,
             .deny = s.deny,
             .psk_entries = s.psk,
+            .reload_keys = cli.loadKeys,
+            .cfg_path = cfg_path,
             .pinned = pinned.items,
         });
         return 0;

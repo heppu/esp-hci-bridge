@@ -42,8 +42,7 @@
 <div class="card">
   <p>After flashing, on the PC: install the <code>hcibridge</code> package from the <a href="https://github.com/heppu/esp-hci-bridge/releases/latest">latest release</a>, then claim the board.</p>
 <pre>hcibridge list                 # find the board
-sudo hcibridge claim &lt;ip&gt;      # pair it with this PC
-sudo systemctl restart hcibridge   # or: rc-service hcibridged restart</pre>
+sudo hcibridge claim &lt;ip&gt;      # pair it with this PC, the daemon picks it up by itself</pre>
   <p>Files in this release, with flash offsets for esptool:</p>
   <table id="parts"></table>
   <pre id="esptool"></pre>
