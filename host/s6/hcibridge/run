@@ -2,4 +2,4 @@
 exec 2>&1
 modprobe hci_vhci 2>/dev/null || true
 [ -f /etc/hcibridge.conf ] && . /etc/hcibridge.conf
-exec /usr/local/bin/hcibridge run $BRIDGE_ARGS
+exec /usr/bin/hcibridge run $BRIDGE_ARGS
