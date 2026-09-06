@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "glue.c" "net.c" "ota.c" "auth.c"
+    SRCS "glue.c" "net.c" "ota.c" "auth.c" "boottrace.c"
     INCLUDE_DIRS "."
     REQUIRES bt esp_eth esp_wifi esp_netif esp_event nvs_flash lwip esp_timer esp_http_server app_update esp_app_format mbedtls
 )

@@ -1,4 +1,5 @@
 #include "glue.h"
+#include "boottrace.h"
 
 #include <string.h>
 
@@ -23,6 +24,7 @@ static volatile uint32_t g_ip4 = 0;
 
 static void on_got_ip(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
+    boottrace_mark(9);
     const ip_event_got_ip_t *ev = data;
     ESP_LOGI(TAG, "ip " IPSTR " gw " IPSTR, IP2STR(&ev->ip_info.ip), IP2STR(&ev->ip_info.gw));
     g_ip4 = ev->ip_info.ip.addr;
