@@ -24,6 +24,7 @@ jobs:
             | tar -xJ -C .tools/zig-xtensa --strip-components=1
       - name: Tag must be on main
         run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git fetch --no-tags --depth=200 origin main
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "tag $GITHUB_REF_NAME is not on main"; exit 1; }
       - name: Release signing key
