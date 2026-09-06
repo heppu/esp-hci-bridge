@@ -201,3 +201,44 @@ test "psk hex round trip" {
     try testing.expectEqualSlices(u8, &psk, &(hexToPsk(&hex).?));
     try testing.expect(hexToPsk("short") == null);
 }
+
+// Known answers computed with Python hmac/hashlib. If the firmware and this
+// file ever disagree, one of them changed the byte layout.
+const kat_psk: Psk = [_]u8{0x42} ** 32;
+const kat_server_nonce: Nonce = [_]u8{0x01} ** 32;
+const kat_client_nonce: Nonce = [_]u8{0x02} ** 32;
+const kat_http_nonce: HttpNonce = .{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19 };
+
+test "clientMac known answer" {
+    const m = clientMac(&kat_psk, &kat_server_nonce, &kat_client_nonce);
+    try testing.expectEqualStrings("2fe39892c5e63ee8db176f30fc167c6dca28c3c7b6de9f282db5a6cb19c469fb", &std.fmt.bytesToHex(m, .lower));
+}
+
+test "boardMac known answer" {
+    const m = boardMac(&kat_psk, &kat_client_nonce, &kat_server_nonce);
+    try testing.expectEqualStrings("1b4c57c4b9475964807cb64cb09f4e9e8b965e528879dffe7da6b16e5bc760c3", &std.fmt.bytesToHex(m, .lower));
+}
+
+test "announceSig known answer" {
+    var sig: [announce_sig_hex_len]u8 = undefined;
+    _ = announceSig(&kat_psk, "a0:a3:b3:2f:61:1e", 4444, "esp-hci-bridge", .{ 172, 16, 135, 242 }, &sig);
+    try testing.expectEqualStrings("f31c4827ed4d937c2384e8e08b99cf52", &sig);
+}
+
+test "httpAuth known answer" {
+    var mac: [mac_len * 2]u8 = undefined;
+    _ = httpAuth(&kat_psk, "POST", "/ota", &kat_http_nonce, "hello", &mac);
+    try testing.expectEqualStrings("d73a6fdc38fd0d275ea4598553abf13d07f8faee5edacb4a6e8d5ecf968a2d6b", &mac);
+}
+
+test "httpPre known answer" {
+    var mac: [mac_len * 2]u8 = undefined;
+    _ = httpPre(&kat_psk, "POST", "/ota", &kat_http_nonce, 5, &mac);
+    try testing.expectEqualStrings("8a27ffcc95c766a804fdb997ada1fd22f1dcc3b09fbe676250823a8e6b04f0b1", &mac);
+}
+
+test "httpAuthLegacy known answer" {
+    var mac: [mac_len * 2]u8 = undefined;
+    _ = httpAuthLegacy(&kat_psk, "POST", "/ota", "hello", &mac);
+    try testing.expectEqualStrings("a5a0c35d2853c43b6c49d62f9e96b169c90907f876817ccd96505fe92ad2a72f", &mac);
+}
