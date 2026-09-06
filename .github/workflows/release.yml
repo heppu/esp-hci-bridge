@@ -46,13 +46,35 @@ jobs:
       - run: zig build release -Dversion="${GITHUB_REF_NAME}"
       - name: Generate man page and completions
         run: zig build gen -Dversion="${GITHUB_REF_NAME}"
-      - name: Collect artifacts
+      - name: Install nfpm
         run: |
+          NV=2.44.0
+          curl -sSL "https://github.com/goreleaser/nfpm/releases/download/v${NV}/nfpm_${NV}_Linux_x86_64.tar.gz" | tar xz nfpm
+          sudo install nfpm /usr/local/bin/nfpm
+      - name: Build packages and metadata
+        run: |
+          set -eu
           mkdir -p out
+          VER="${GITHUB_REF_NAME#v}"
+          export VERSION="$VER"
           cp zig-out/x86_64-linux-musl/hcibridge   out/hcibridge-x86_64-linux
           cp zig-out/aarch64-linux-musl/hcibridge  out/hcibridge-aarch64-linux
           cp zig-out/arm-linux-musleabihf/hcibridge out/hcibridge-armv7-linux
           cp zig-out/gen/hcibridge.1 zig-out/gen/hcibridge.bash zig-out/gen/_hcibridge zig-out/gen/hcibridge.fish out/
+          # deb/rpm/apk for each arch from the one nfpm config
+          set -- "x86_64-linux-musl amd64" "aarch64-linux-musl arm64" "arm-linux-musleabihf arm7"
+          for pair in "$@"; do
+            triple=${pair% *}; arch=${pair#* }
+            for fmt in deb rpm apk; do
+              BIN="zig-out/$triple/hcibridge" PKG_ARCH="$arch" nfpm pkg -f packaging/nfpm.yaml -p "$fmt" -t out/
+            done
+          done
+          # AUR PKGBUILD and Alpine APKBUILD with version + source checksum
+          SHA=$(curl -sL "https://github.com/heppu/esp-hci-bridge/archive/refs/tags/${GITHUB_REF_NAME}.tar.gz" | sha256sum | cut -d' ' -f1)
+          sed -e "s/@PKGVER@/$VER/" -e "s/@SHA256@/$SHA/" packaging/PKGBUILD.tmpl > out/PKGBUILD
+          sed -e "s/@PKGVER@/$VER/" packaging/APKBUILD.tmpl > out/APKBUILD
+          sed -e "s/@PKGVER@/$VER/" -e "s/@SHA256@/$SHA/" packaging/void-template.tmpl > out/void-template
+          ls -1 out/
       - uses: actions/upload-artifact@v4
         with:
           name: cli
@@ -88,6 +110,12 @@ jobs:
             cli/hcibridge.bash
             cli/_hcibridge
             cli/hcibridge.fish
+            cli/*.deb
+            cli/*.rpm
+            cli/*.apk
+            cli/PKGBUILD
+            cli/APKBUILD
+            cli/void-template
           generate_release_notes: true
 
   pages:

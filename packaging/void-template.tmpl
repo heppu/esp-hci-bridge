@@ -1,0 +1,37 @@
+# Template file for 'hcibridge'
+# Drop this in void-packages as srcpkgs/hcibridge/template and run xbps-src.
+pkgname=hcibridge
+version=@PKGVER@
+revision=1
+hostmakedepends="zig"
+depends="bluez"
+short_desc="Attach remote ESP32 Bluetooth bridges to the local Bluetooth stack"
+maintainer="Henri Koski <henri.koski@bitbrewers.fi>"
+license="MIT"
+homepage="https://github.com/heppu/esp-hci-bridge"
+distfiles="https://github.com/heppu/esp-hci-bridge/archive/refs/tags/v${version}.tar.gz"
+checksum=@SHA256@
+conf_files="/etc/hcibridge/config /etc/hcibridge/config.d/50-example.conf"
+
+do_build() {
+	zig build -Doptimize=ReleaseSafe "-Dversion=v${version}"
+	zig build gen "-Dversion=v${version}"
+}
+
+do_install() {
+	vbin zig-out/bin/hcibridge
+	vman zig-out/gen/hcibridge.1
+	vcompletion zig-out/gen/hcibridge.bash bash
+	vcompletion zig-out/gen/_hcibridge zsh
+	vcompletion zig-out/gen/hcibridge.fish fish
+	vinstall host/config/config 644 etc/hcibridge config
+	vinstall host/config/config.d/50-example.conf 644 etc/hcibridge/config.d 50-example.conf
+	vinstall host/hcibridge.conf 644 etc hcibridge.conf
+	vinstall host/modules-load.conf 644 usr/lib/modules-load.d hci_vhci.conf
+	# runit service (Void's init)
+	vmkdir etc/sv/hcibridge
+	vmkdir etc/sv/hcibridge/log
+	install -m755 host/runit/hcibridge/run "${DESTDIR}/etc/sv/hcibridge/run"
+	install -m755 host/runit/hcibridge/log/run "${DESTDIR}/etc/sv/hcibridge/log/run"
+	vlicense LICENSE
+}

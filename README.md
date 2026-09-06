@@ -125,6 +125,31 @@ every 2s and also answers a probe. The protocol lives in `common/discovery.zig`.
 Needs a kernel with `hci_vhci` and bluez. Build needs Zig 0.16, or grab a
 static binary from the latest release (no toolchain, no libc).
 
+### Install from a package (recommended)
+
+Each release ships packages built from one nfpm config, plus source recipes.
+
+**Debian / Ubuntu** (`.deb`), **Fedora / RHEL** (`.rpm`), **Alpine** (`.apk`) -
+download the file for your architecture from the
+[latest release](https://github.com/heppu/esp-hci-bridge/releases/latest):
+
+```
+sudo dpkg -i hcibridge_*_amd64.deb            # Debian/Ubuntu
+sudo rpm -i hcibridge-*.x86_64.rpm            # Fedora/RHEL
+sudo apk add --allow-untrusted hcibridge_*_x86_64.apk   # Alpine
+```
+
+These install the binary, completions, man page, config in `/etc/hcibridge/`,
+the service (systemd on deb/rpm, OpenRC on apk), and enable it in discovery mode.
+
+**Arch (AUR)**: the release ships a `PKGBUILD` (source build). `makepkg -si`.
+**Alpine (source)**: an `APKBUILD` for `abuild`.
+**Void Linux**: a `void-template`; drop it in `void-packages/srcpkgs/hcibridge/template` and `./xbps-src pkg hcibridge`.
+
+Build the packages yourself with `packaging/build.sh` (needs `zig` and `nfpm`).
+
+### Install with the script
+
 Install as a boot service:
 
 ```

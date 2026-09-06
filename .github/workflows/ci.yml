@@ -17,6 +17,12 @@ jobs:
       - run: zig build -Doptimize=ReleaseSafe
       - run: zig build release
       - run: zig build gen
+      - name: Package smoke test (deb/rpm/apk)
+        run: |
+          NV=2.44.0
+          curl -sSL "https://github.com/goreleaser/nfpm/releases/download/v${NV}/nfpm_${NV}_Linux_x86_64.tar.gz" | tar xz nfpm
+          for fmt in deb rpm apk; do BIN=zig-out/bin/hcibridge PKG_ARCH=amd64 VERSION=0.0.0 ./nfpm pkg -f packaging/nfpm.yaml -p $fmt -t .; done
+          ls -1 *.deb *.rpm *.apk
 
   firmware:
     runs-on: ubuntu-latest
