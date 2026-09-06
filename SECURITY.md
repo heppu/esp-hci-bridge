@@ -8,7 +8,7 @@ vulnerability"). You should hear back within a week.
 
 ## What is covered
 
-The threat model is documented in the README under "Security model". In short,
+The threat model is summarised in the README under "Security in short" and detailed in docs/DEVELOPMENT.md under "Protocol". In short,
 everything a board does on the network is authenticated with a per-board key
 established by `hcibridge claim`, and firmware updates over the network are
 signed with the project's release key. Reports about bypassing either of those,
