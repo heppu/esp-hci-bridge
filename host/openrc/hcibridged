@@ -2,7 +2,7 @@
 # Attaches remote ESP32 Bluetooth bridges to the local bluez stack.
 
 description="ESP HCI bridge daemon"
-command="/usr/local/bin/hcibridge"
+command="/usr/bin/hcibridge"
 # Empty BRIDGE_HOST => discovery mode (find every bridge on the LAN).
 command_args="run ${BRIDGE_HOST:+--host ${BRIDGE_HOST}} --vhci ${BRIDGE_VHCI:-/dev/vhci} ${BRIDGE_ARGS:-}"
 supervisor="supervise-daemon"

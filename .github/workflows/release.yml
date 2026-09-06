@@ -65,8 +65,10 @@ jobs:
           set -- "x86_64-linux-musl amd64" "aarch64-linux-musl arm64" "arm-linux-musleabihf arm7"
           for pair in "$@"; do
             triple=${pair% *}; arch=${pair#* }
+            mkdir -p dist
+            cp "zig-out/$triple/hcibridge" dist/hcibridge
             for fmt in deb rpm apk; do
-              BIN="zig-out/$triple/hcibridge" PKG_ARCH="$arch" nfpm pkg -f packaging/nfpm.yaml -p "$fmt" -t out/
+              PKG_ARCH="$arch" nfpm pkg -f packaging/nfpm.yaml -p "$fmt" -t out/
             done
           done
           # AUR PKGBUILD and Alpine APKBUILD with version + source checksum

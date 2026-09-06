@@ -10,9 +10,13 @@ vendor: heppu
 homepage: https://github.com/heppu/esp-hci-bridge
 license: MIT
 
+# Per-file `packager:` selects a format; entries without it go to every format.
+# (Do not use per-format `overrides.contents` — it replaces this whole list.)
 contents:
-  - src: ${BIN}
+  - src: dist/hcibridge
     dst: /usr/bin/hcibridge
+    file_info:
+      mode: 0755
   - src: zig-out/gen/hcibridge.bash
     dst: /usr/share/bash-completion/completions/hcibridge
   - src: zig-out/gen/_hcibridge
@@ -30,38 +34,45 @@ contents:
   - src: host/modules-load.conf
     dst: /usr/lib/modules-load.d/hci_vhci.conf
 
+  # systemd (deb, rpm)
+  - src: host/systemd/hcibridge.service
+    dst: /usr/lib/systemd/system/hcibridge.service
+    packager: deb
+  - src: host/systemd/hcibridge.env
+    dst: /etc/default/hcibridge
+    type: config|noreplace
+    packager: deb
+  - src: host/systemd/hcibridge.service
+    dst: /usr/lib/systemd/system/hcibridge.service
+    packager: rpm
+  - src: host/systemd/hcibridge.env
+    dst: /etc/default/hcibridge
+    type: config|noreplace
+    packager: rpm
+
+  # OpenRC (apk)
+  - src: host/openrc/hcibridged
+    dst: /etc/init.d/hcibridged
+    file_info:
+      mode: 0755
+    packager: apk
+  - src: host/openrc/hcibridged.confd
+    dst: /etc/conf.d/hcibridged
+    type: config|noreplace
+    packager: apk
+
 overrides:
   deb:
     depends: [bluez]
-    contents:
-      - src: host/systemd/hcibridge.service
-        dst: /usr/lib/systemd/system/hcibridge.service
-      - src: host/systemd/hcibridge.env
-        dst: /etc/default/hcibridge
-        type: config|noreplace
     scripts:
       postinstall: packaging/systemd-postinstall.sh
       preremove: packaging/systemd-preremove.sh
   rpm:
     depends: [bluez]
-    contents:
-      - src: host/systemd/hcibridge.service
-        dst: /usr/lib/systemd/system/hcibridge.service
-      - src: host/systemd/hcibridge.env
-        dst: /etc/default/hcibridge
-        type: config|noreplace
     scripts:
       postinstall: packaging/systemd-postinstall.sh
       preremove: packaging/systemd-preremove.sh
   apk:
     depends: [bluez, bluez-openrc]
-    contents:
-      - src: host/openrc/hcibridged
-        dst: /etc/init.d/hcibridged
-        file_info:
-          mode: 0755
-      - src: host/openrc/hcibridged.confd
-        dst: /etc/conf.d/hcibridged
-        type: config|noreplace
     scripts:
       postinstall: packaging/openrc-postinstall.sh

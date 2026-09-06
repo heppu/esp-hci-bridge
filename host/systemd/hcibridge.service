@@ -10,7 +10,7 @@ Before=bluetooth.service
 Type=simple
 EnvironmentFile=-/etc/default/hcibridge
 ExecStartPre=-/sbin/modprobe hci_vhci
-ExecStart=/usr/local/bin/hcibridge run $BRIDGE_ARGS
+ExecStart=/usr/bin/hcibridge run $BRIDGE_ARGS
 Restart=always
 RestartSec=2
 

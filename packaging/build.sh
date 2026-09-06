@@ -8,7 +8,8 @@ export VERSION
 zig build -Doptimize=ReleaseSafe "-Dversion=v$VERSION"
 zig build gen "-Dversion=v$VERSION"
 mkdir -p dist
-BIN=zig-out/bin/hcibridge PKG_ARCH=amd64 nfpm pkg -f packaging/nfpm.yaml -p deb -t dist/
-BIN=zig-out/bin/hcibridge PKG_ARCH=amd64 nfpm pkg -f packaging/nfpm.yaml -p rpm -t dist/
-BIN=zig-out/bin/hcibridge PKG_ARCH=amd64 nfpm pkg -f packaging/nfpm.yaml -p apk -t dist/
+cp zig-out/bin/hcibridge dist/hcibridge
+PKG_ARCH=amd64 nfpm pkg -f packaging/nfpm.yaml -p deb -t dist/
+PKG_ARCH=amd64 nfpm pkg -f packaging/nfpm.yaml -p rpm -t dist/
+PKG_ARCH=amd64 nfpm pkg -f packaging/nfpm.yaml -p apk -t dist/
 echo "built:"; ls -1 dist/

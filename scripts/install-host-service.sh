@@ -11,14 +11,14 @@ fi
 
 echo "building release binary"
 (cd "$ROOT" && zig build -Doptimize=ReleaseSafe)
-install -m 0755 "$ROOT/zig-out/bin/hcibridge" /usr/local/bin/hcibridge
+install -m 0755 "$ROOT/zig-out/bin/hcibridge" /usr/bin/hcibridge
 
 # Stop any hand-run daemon (old or new name) so it does not fight the service
 # for /dev/vhci. Only targets in-tree binaries, not the installed one.
 pkill -f "zig-out/bin/hcibridge" 2>/dev/null || true
 
 # Shell completions and man page, generated from the binary (single source).
-BIN=/usr/local/bin/hcibridge
+BIN=/usr/bin/hcibridge
 if [ -d /usr/share/bash-completion/completions ]; then
     "$BIN" completions bash > /usr/share/bash-completion/completions/hcibridge
 fi
@@ -86,10 +86,10 @@ elif command -v s6-rc >/dev/null 2>&1 || command -v s6-svscan >/dev/null 2>&1; t
 else
     echo "no known init system detected. run it yourself:"
     echo "  modprobe hci_vhci"
-    echo "  /usr/local/bin/hcibridge run"
+    echo "  /usr/bin/hcibridge run"
 fi
 
 echo
-echo "done. binary: /usr/local/bin/hcibridge"
+echo "done. binary: /usr/bin/hcibridge"
 echo "check bridges:  hcibridge list"
 echo "if bluez does not show controllers, restart the bluetooth service once."
