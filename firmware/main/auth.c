@@ -282,3 +282,18 @@ int auth_claim(const uint8_t peer_pub[32], uint8_t our_pub[32])
     ESP_LOGI(TAG, "board claimed, key stored");
     return ESP_OK;
 }
+
+int auth_unclaim(void)
+{
+    nvs_handle_t h;
+    if (nvs_open("bridge", NVS_READWRITE, &h) != ESP_OK) return ESP_FAIL;
+    esp_err_t err = nvs_erase_key(h, "psk");
+    if (err == ESP_ERR_NVS_NOT_FOUND) err = ESP_OK;
+    if (err == ESP_OK) err = nvs_commit(h);
+    nvs_close(h);
+    if (err != ESP_OK) return err;
+    memset(g_psk, 0, sizeof(g_psk));
+    g_claimed = false;
+    ESP_LOGW(TAG, "board unclaimed, key erased");
+    return ESP_OK;
+}

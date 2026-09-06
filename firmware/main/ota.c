@@ -170,6 +170,28 @@ static esp_err_t reboot_post(httpd_req_t *req)
     return ESP_OK;
 }
 
+// POST /unclaim: proves the current key, erases it, reboots unclaimed so
+// another PC can claim the board. Needs the key, so a stranger cannot do it.
+static esp_err_t unclaim_post(httpd_req_t *req)
+{
+    char auth[80], pre[80];
+    uint8_t empty_sha[32];
+    mbedtls_sha256((const unsigned char *)"", 0, empty_sha, 0);
+    if (!get_proofs(req, auth, pre, sizeof(auth)) || !auth_check_http_pre("POST", "/unclaim", 0, pre) ||
+        !auth_check_http("POST", "/unclaim", empty_sha, auth)) {
+        httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "bad or missing X-Bridge-Auth / X-Bridge-Pre");
+        return ESP_FAIL;
+    }
+    if (auth_unclaim() != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "could not erase key");
+        return ESP_FAIL;
+    }
+    httpd_resp_sendstr(req, "unclaimed, rebooting\n");
+    vTaskDelay(pdMS_TO_TICKS(300));
+    esp_restart();
+    return ESP_OK;
+}
+
 // POST /claim, body = 64 hex chars (client X25519 public key). Only while
 // unclaimed. Replies with the board's public key; both sides derive the PSK.
 static esp_err_t claim_post(httpd_req_t *req)
@@ -240,10 +262,13 @@ void ota_init(void)
     const httpd_uri_t ota_uri = { .uri = "/ota", .method = HTTP_POST, .handler = ota_post };
     const httpd_uri_t reboot_uri = { .uri = "/reboot", .method = HTTP_POST, .handler = reboot_post };
     const httpd_uri_t claim_uri = { .uri = "/claim", .method = HTTP_POST, .handler = claim_post };
+    const httpd_uri_t unclaim_uri = { .uri = "/unclaim", .method = HTTP_POST, .handler = unclaim_post };
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &status_uri));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &ota_uri));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &reboot_uri));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &claim_uri));
+    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &unclaim_uri));
+    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &unclaim_uri));
     ESP_LOGI(TAG, "http status on /, updates via POST /ota");
 }
 
