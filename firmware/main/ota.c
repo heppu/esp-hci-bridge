@@ -15,6 +15,11 @@
 
 static const char *TAG = "ota";
 
+#define OTA_MAX_RECV_TIMEOUTS 6
+#define ROLLBACK_GRACE_US (5 * 60 * 1000000LL)
+
+static esp_timer_handle_t g_rollback_timer;
+
 static esp_err_t status_get(httpd_req_t *req)
 {
     const esp_app_desc_t *app = esp_app_get_description();
@@ -24,44 +29,56 @@ static esp_err_t status_get(httpd_req_t *req)
 
     char stats[256];
     bridge_stats_json(stats, sizeof(stats));
+    char nonce[41];
+    auth_nonce_hex(nonce, sizeof(nonce));
 
-    char body[512];
+    char body[576];
     int n = snprintf(body, sizeof(body),
                      "{\"version\":\"%s\",\"idf\":\"%s\",\"partition\":\"%s\","
-                     "\"bdaddr\":\"%02x:%02x:%02x:%02x:%02x:%02x\",\"claimed\":%s,\"uptime_s\":%lld,"
+                     "\"bdaddr\":\"%02x:%02x:%02x:%02x:%02x:%02x\",\"claimed\":%s,\"nonce\":\"%s\",\"uptime_s\":%lld,"
                      "\"free_heap\":%lu,\"stats\":%s}\n",
                      app->version, app->idf_ver, running ? running->label : "?",
                      mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
-                     auth_claimed() ? "true" : "false",
+                     auth_claimed() ? "true" : "false", nonce,
                      (long long)(esp_timer_get_time() / 1000000),
                      (unsigned long)esp_get_free_heap_size(), stats);
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, body, n);
 }
 
-// Pulls the X-Bridge-Auth header (64 hex chars) or returns false.
-static bool get_auth_header(httpd_req_t *req, char *out, size_t outlen)
+static bool get_header(httpd_req_t *req, const char *name, char *out, size_t outlen)
 {
-    size_t n = httpd_req_get_hdr_value_len(req, "X-Bridge-Auth");
+    size_t n = httpd_req_get_hdr_value_len(req, name);
     if (n == 0 || n + 1 > outlen) return false;
-    return httpd_req_get_hdr_value_str(req, "X-Bridge-Auth", out, outlen) == ESP_OK;
+    return httpd_req_get_hdr_value_str(req, name, out, outlen) == ESP_OK;
+}
+
+// Both proofs are bound to the nonce published by GET /, so each is only
+// good for one accepted request.
+static bool get_proofs(httpd_req_t *req, char *auth, char *pre, size_t len)
+{
+    return auth_claimed() && get_header(req, "X-Bridge-Auth", auth, len) && get_header(req, "X-Bridge-Pre", pre, len);
 }
 
 static esp_err_t ota_post(httpd_req_t *req)
 {
-    // The body is hashed while it streams to flash; the proof is checked
-    // before the new slot is ever selected for boot.
-    char hdr[80];
-    if (!auth_claimed() || !get_auth_header(req, hdr, sizeof(hdr))) {
-        httpd_resp_send_err(req, HTTPD_401_UNAUTHORIZED, "X-Bridge-Auth required (claim the board first)");
+    char auth[80], pre[80];
+    if (!get_proofs(req, auth, pre, sizeof(auth))) {
+        httpd_resp_send_err(req, HTTPD_401_UNAUTHORIZED, "X-Bridge-Auth and X-Bridge-Pre required (claim the board first)");
         return ESP_FAIL;
     }
-    mbedtls_sha256_context sha;
-    mbedtls_sha256_init(&sha);
-    mbedtls_sha256_starts(&sha, 0);
     const esp_partition_t *part = esp_ota_get_next_update_partition(NULL);
     if (!part) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "no ota partition");
+        return ESP_FAIL;
+    }
+    if (req->content_len > part->size) {
+        httpd_resp_send_err(req, HTTPD_413_CONTENT_TOO_LARGE, "image larger than the ota partition");
+        return ESP_FAIL;
+    }
+    if (!auth_check_http_pre("POST", "/ota", (uint32_t)req->content_len, pre)) {
+        ESP_LOGW(TAG, "rejected OTA: bad pre-upload proof");
+        httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "bad X-Bridge-Pre");
         return ESP_FAIL;
     }
     ESP_LOGI(TAG, "update of %d bytes into %s", req->content_len, part->label);
@@ -73,12 +90,20 @@ static esp_err_t ota_post(httpd_req_t *req)
         return ESP_FAIL;
     }
 
+    mbedtls_sha256_context sha;
+    mbedtls_sha256_init(&sha);
+    mbedtls_sha256_starts(&sha, 0);
     char buf[1024];
     int remaining = req->content_len;
+    int timeouts = 0;
     while (remaining > 0) {
         int n = httpd_req_recv(req, buf, remaining < (int)sizeof(buf) ? remaining : (int)sizeof(buf));
         if (n == HTTPD_SOCK_ERR_TIMEOUT) {
-            continue;
+            if (++timeouts < OTA_MAX_RECV_TIMEOUTS) continue;
+            esp_ota_abort(handle);
+            mbedtls_sha256_free(&sha);
+            httpd_resp_send_err(req, HTTPD_408_REQ_TIMEOUT, "upload stalled");
+            return ESP_FAIL;
         }
         if (n <= 0) {
             esp_ota_abort(handle);
@@ -86,6 +111,7 @@ static esp_err_t ota_post(httpd_req_t *req)
             httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "upload interrupted");
             return ESP_FAIL;
         }
+        timeouts = 0;
         mbedtls_sha256_update(&sha, (const unsigned char *)buf, n);
         err = esp_ota_write(handle, buf, n);
         if (err != ESP_OK) {
@@ -100,7 +126,7 @@ static esp_err_t ota_post(httpd_req_t *req)
     uint8_t digest[32];
     mbedtls_sha256_finish(&sha, digest);
     mbedtls_sha256_free(&sha);
-    if (!auth_check_http("POST", "/ota", digest, hdr)) {
+    if (!auth_check_http("POST", "/ota", digest, auth)) {
         esp_ota_abort(handle);
         ESP_LOGW(TAG, "rejected OTA: bad auth");
         httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "bad X-Bridge-Auth");
@@ -117,6 +143,7 @@ static esp_err_t ota_post(httpd_req_t *req)
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, esp_err_to_name(err));
         return ESP_FAIL;
     }
+    auth_nonce_bump();
 
     httpd_resp_sendstr(req, "ok, rebooting\n");
     ESP_LOGI(TAG, "update written, rebooting");
@@ -127,13 +154,15 @@ static esp_err_t ota_post(httpd_req_t *req)
 
 static esp_err_t reboot_post(httpd_req_t *req)
 {
-    char hdr[80];
+    char auth[80], pre[80];
     uint8_t empty_sha[32];
     mbedtls_sha256((const unsigned char *)"", 0, empty_sha, 0);
-    if (!auth_claimed() || !get_auth_header(req, hdr, sizeof(hdr)) || !auth_check_http("POST", "/reboot", empty_sha, hdr)) {
-        httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "bad or missing X-Bridge-Auth");
+    if (!get_proofs(req, auth, pre, sizeof(auth)) || !auth_check_http_pre("POST", "/reboot", 0, pre) ||
+        !auth_check_http("POST", "/reboot", empty_sha, auth)) {
+        httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "bad or missing X-Bridge-Auth / X-Bridge-Pre");
         return ESP_FAIL;
     }
+    auth_nonce_bump();
     httpd_resp_sendstr(req, "rebooting\n");
     ESP_LOGI(TAG, "reboot requested");
     vTaskDelay(pdMS_TO_TICKS(300));
@@ -176,8 +205,30 @@ static esp_err_t claim_post(httpd_req_t *req)
     return httpd_resp_send(req, out, 65);
 }
 
+static bool pending_verify(void)
+{
+    esp_ota_img_states_t state;
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    return esp_ota_get_state_partition(running, &state) == ESP_OK && state == ESP_OTA_IMG_PENDING_VERIFY;
+}
+
+// A fresh image that never gets an address would otherwise stay unconfirmed
+// forever, the reboot lets the bootloader roll back.
+static void rollback_timeout(void *arg)
+{
+    if (!pending_verify()) return;
+    ESP_LOGE(TAG, "no ip within the grace period, rebooting to roll back");
+    esp_restart();
+}
+
 void ota_init(void)
 {
+    if (pending_verify()) {
+        const esp_timer_create_args_t args = { .callback = rollback_timeout, .name = "ota_rollback" };
+        ESP_ERROR_CHECK(esp_timer_create(&args, &g_rollback_timer));
+        ESP_ERROR_CHECK(esp_timer_start_once(g_rollback_timer, ROLLBACK_GRACE_US));
+    }
+
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.stack_size = 8192;
     config.lru_purge_enable = true;
@@ -200,10 +251,9 @@ void ota_init(void)
 // address. Otherwise the bootloader rolls back on the next reset.
 void ota_confirm(void)
 {
-    esp_ota_img_states_t state;
-    const esp_partition_t *running = esp_ota_get_running_partition();
-    if (esp_ota_get_state_partition(running, &state) == ESP_OK && state == ESP_OTA_IMG_PENDING_VERIFY) {
+    if (pending_verify()) {
         esp_ota_mark_app_valid_cancel_rollback();
         ESP_LOGI(TAG, "image confirmed");
     }
+    if (g_rollback_timer) esp_timer_stop(g_rollback_timer);
 }
