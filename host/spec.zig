@@ -62,6 +62,12 @@ pub const commands = [_]Cmd{
         .opts = &.{config_opt},
     },
     .{
+        .name = "revoke",
+        .summary = "stop accepting a bridge: remove its key from the config",
+        .args = "<bdaddr>",
+        .opts = &.{config_opt},
+    },
+    .{
         .name = "reboot",
         .summary = "reboot a bridge (requires its key)",
         .args = "<ip>",
