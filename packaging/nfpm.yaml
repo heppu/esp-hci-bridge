@@ -76,3 +76,7 @@ overrides:
     depends: [bluez, bluez-openrc]
     scripts:
       postinstall: packaging/openrc-postinstall.sh
+      preremove: packaging/openrc-preremove.sh
+    apk:
+      scripts:
+        postupgrade: packaging/openrc-postinstall.sh
