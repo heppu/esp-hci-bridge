@@ -251,3 +251,26 @@ test "zero length payloads" {
 test "iso length masks reserved bits" {
     try testing.expectEqual(@as(usize, 3), PacketType.iso.payloadLen(&.{ 0x02, 0x00, 0x03, 0x40 }));
 }
+
+test "packet exactly filling storage is accepted, one byte over is not" {
+    var storage: [16]u8 = undefined;
+    var re = Reassembler.init(&storage);
+    const fits = [_]u8{ 0x02, 0x40, 0x20, 11, 0x00 } ++ [_]u8{0xaa} ** 11;
+    const r = try re.feed(&fits);
+    try testing.expectEqual(fits.len, r.consumed);
+    try testing.expectEqualSlices(u8, &fits, r.packet.?);
+
+    const over = [_]u8{ 0x02, 0x40, 0x20, 12, 0x00 } ++ [_]u8{0xbb} ** 12;
+    try testing.expectError(error.PacketTooLarge, re.feed(&over));
+}
+
+test "reset recovers after PacketTooLarge" {
+    var storage: [16]u8 = undefined;
+    var re = Reassembler.init(&storage);
+    const over = [_]u8{ 0x02, 0x40, 0x20, 12, 0x00 };
+    try testing.expectError(error.PacketTooLarge, re.feed(&over));
+    try testing.expectError(error.PacketTooLarge, re.feed(&reset_cmd));
+    re.reset();
+    const r = try re.feed(&reset_cmd);
+    try testing.expectEqualSlices(u8, &reset_cmd, r.packet.?);
+}

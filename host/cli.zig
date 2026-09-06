@@ -11,11 +11,22 @@ const X25519 = std.crypto.dh.X25519;
 
 pub const default_config = "/etc/hcibridge/config";
 
-/// Loads psk entries from the config (main + .d). Caller deinit()s.
+fn envGet(ctx: ?*anyopaque, name: []const u8) ?[]const u8 {
+    const env: *const std.process.Environ = @ptrCast(@alignCast(ctx.?));
+    return env.getPosix(name);
+}
+
+/// Loads psk entries from the config (main + .d) and HCIBRIDGE_PSK. Caller deinit()s.
 fn loadKeys(io: Io, gpa: std.mem.Allocator, cfg_path: []const u8) !settings.Settings {
-    var raw = config.loadRaw(gpa, io, cfg_path) catch config.Raw{ .arena = std.heap.ArenaAllocator.init(gpa) };
+    var raw = config.loadRaw(gpa, io, cfg_path) catch |err| blk: {
+        log.warn("config {s}: {s} (using defaults)", .{ cfg_path, @errorName(err) });
+        break :blk config.Raw{ .arena = std.heap.ArenaAllocator.init(gpa) };
+    };
     defer raw.deinit();
-    return settings.resolve(gpa, raw.pairs.items, &.{}, null, null);
+    // The process Io is always Io.Threaded (see start.zig), which carries the environ.
+    const threaded: *Io.Threaded = @ptrCast(@alignCast(io.userdata));
+    var env = threaded.environ.process_environ;
+    return settings.resolve(gpa, raw.pairs.items, &.{}, envGet, @ptrCast(&env));
 }
 
 const BoardInfo = struct {
@@ -69,16 +80,9 @@ pub fn collect(io: Io, gpa: std.mem.Allocator, discovery_port: u16, window_ms: u
     sock.send(io, &bcast, disc.buildProbe(&pbuf)) catch {};
 
     var rbuf: [disc.max_datagram]u8 = undefined;
-    const tick_ms: u32 = 250;
-    var ticks = @max(@as(u32, 1), window_ms / tick_ms);
-    while (ticks > 0) {
-        const msg = sock.receiveTimeout(io, &rbuf, .{ .duration = .{ .raw = Io.Duration.fromMilliseconds(tick_ms), .clock = .awake } }) catch |err| switch (err) {
-            error.Timeout => {
-                ticks -= 1;
-                continue;
-            },
-            else => break,
-        };
+    const deadline = Io.Clock.Timestamp.fromNow(io, .{ .raw = Io.Duration.fromMilliseconds(window_ms), .clock = .awake });
+    while (deadline.durationFromNow(io).raw.nanoseconds > 0) {
+        const msg = sock.receiveTimeout(io, &rbuf, .{ .deadline = deadline }) catch break;
         const parsed = disc.parse(msg.data) catch continue;
         const ann = switch (parsed) {
             .announce => |a| a,
@@ -303,6 +307,10 @@ pub fn claim(io: Io, gpa: std.mem.Allocator, ip: []const u8, cfg_path: []const u
     }
     const board_hex = std.mem.trim(u8, r.body, " \r\n");
     var board_pk: [32]u8 = undefined;
+    if (board_hex.len != board_pk.len * 2) {
+        log.err("bad board public key in reply: {d} chars, want 64", .{board_hex.len});
+        return 1;
+    }
     _ = std.fmt.hexToBytes(&board_pk, board_hex) catch {
         log.err("bad board public key in reply", .{});
         return 1;
@@ -327,12 +335,16 @@ pub fn claim(io: Io, gpa: std.mem.Allocator, ip: []const u8, cfg_path: []const u
         var out = Io.File.stdout().writer(io, &obuf);
         try out.interface.print("# add this line to {s} (or a .d drop-in):\n{s}", .{ cfg_path, line });
         try out.interface.flush();
+        return 3;
     }
     return 0;
 }
 
+/// Writes a secret: created 0600, and re-chmodded in case the file already existed.
 fn writeFile(io: Io, path: []const u8, data: []const u8) !void {
-    const f = try Io.Dir.cwd().createFile(io, path, .{ .truncate = true });
+    const mode: Io.File.Permissions = .fromMode(0o600);
+    const f = try Io.Dir.cwd().createFile(io, path, .{ .truncate = true, .permissions = mode });
     defer f.close(io);
+    try f.setPermissions(io, mode);
     try f.writeStreamingAll(io, data);
 }
