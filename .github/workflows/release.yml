@@ -100,13 +100,6 @@ jobs:
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
         with:
           version: 0.16.0
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ~/.cache/zig
-          key: zig-cache-${{ hashFiles('build.zig', 'build.zig.zon') }}-${{ github.sha }}
-          restore-keys: |
-            zig-cache-${{ hashFiles('build.zig', 'build.zig.zon') }}-
-            zig-cache-
       - run: zig build test --summary all
       - run: zig build release -Dversion="${GITHUB_REF_NAME}"
       - name: Generate man page and completions
