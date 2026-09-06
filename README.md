@@ -77,8 +77,10 @@ From then on the board only accepts this PC and the PC only trusts this board.
 Each board gets its own key, so `sudo hcibridge revoke <bdaddr>` removes just
 that board: its key is deleted from the config and the daemon drops it on the
 spot. A claimed board refuses any other claim, so nobody else on the network can
-take it over. To move a board to a different PC, erase it once over USB
-(`esptool erase_flash`) and re-flash.
+take it over. To hand a board to a different PC, `sudo hcibridge unclaim <ip>`
+from the PC that owns it: the board forgets its key, reboots unclaimed, and the
+key is removed here as well. Only if that PC is gone too, erase the board once
+over USB (`esptool erase_flash`) and re-flash.
 
 ### 4. Pair your devices
 
@@ -99,7 +101,8 @@ rest by hand:
 | `hcibridge claim <ip>` | pair a new board with this PC |
 | `hcibridge status <ip>` | full status of one board |
 | `hcibridge update <ip\|all> <file.bin>` | update firmware over the network |
-| `hcibridge revoke <bdaddr>` | stop accepting a board (removes its key, no restart needed) |
+| `hcibridge revoke <bdaddr>` | stop accepting a board (removes its key here, no restart needed) |
+| `hcibridge unclaim <ip>` | release a board so another PC can claim it (needs its key) |
 | `hcibridge reboot <ip>` | reboot a board |
 | `hcibridge run` | the daemon (started by the service) |
 

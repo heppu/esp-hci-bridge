@@ -62,6 +62,12 @@ pub const commands = [_]Cmd{
         .opts = &.{config_opt},
     },
     .{
+        .name = "unclaim",
+        .summary = "release a bridge so another PC can claim it (requires its key)",
+        .args = "<ip>",
+        .opts = &.{config_opt},
+    },
+    .{
         .name = "revoke",
         .summary = "stop accepting a bridge: remove its key from the config",
         .args = "<bdaddr>",

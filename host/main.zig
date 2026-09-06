@@ -93,6 +93,17 @@ pub fn main(init: std.process.Init) !u8 {
         };
         return cli.claim(io, gpa, ip, cfg);
     }
+    if (std.mem.eql(u8, cmd, "unclaim")) {
+        const ip = it.next() orelse {
+            log.err("usage: hcibridge unclaim <ip> [--config <path>]", .{});
+            return 2;
+        };
+        var cfg: []const u8 = cli.default_config;
+        while (it.next()) |a| if (std.mem.eql(u8, a, "--config")) {
+            cfg = it.next() orelse return error.MissingValue;
+        };
+        return cli.unclaim(io, gpa, ip, cfg);
+    }
     if (std.mem.eql(u8, cmd, "revoke")) {
         const bdaddr = it.next() orelse {
             log.err("usage: hcibridge revoke <bdaddr> [--config <path>]", .{});
