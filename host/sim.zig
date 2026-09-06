@@ -16,6 +16,8 @@ pub const Controller = struct {
     commands: u64 = 0,
     /// Board key. Null means unclaimed: HCI connections are refused, like the firmware.
     psk: ?auth.Psk = null,
+    /// Test hook: answer the handshake with a proof made from the wrong key.
+    bad_mac: bool = false,
 
     const Opcode = struct {
         const reset: u16 = 0x0c03;
@@ -75,7 +77,7 @@ pub const Controller = struct {
                 plen = 9;
             },
             Opcode.read_local_ext_features => {
-                const page = if (pkt.len > 3) pkt[3] else 0;
+                const page = if (pkt.len > 4) pkt[4] else 0;
                 params[1] = page;
                 params[2] = 2;
                 @memset(params[3..11], 0);
@@ -126,7 +128,9 @@ pub fn serve(io: Io, stream: Io.net.Stream, ctrl: *Controller) !void {
         log.warn("unclaimed: refusing HCI connection", .{});
         return error.Unclaimed;
     };
-    try handshake.board(io, stream, &psk);
+    var wrong: auth.Psk = psk;
+    wrong[0] +%= 1;
+    try handshake.boardWith(io, stream, &psk, .{ .reply_psk = if (ctrl.bad_mac) &wrong else null });
     var read_buf: [4096]u8 = undefined;
     var write_buf: [4096]u8 = undefined;
     var storage: [h4.max_packet_len]u8 = undefined;

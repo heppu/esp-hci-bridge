@@ -9,19 +9,45 @@ const handshake = @import("handshake.zig");
 
 const log = std.log.scoped(.board);
 
+/// Lets the manager tear down a live link when the board reappears from a new address.
+pub const Link = struct {
+    mutex: Io.Mutex = .init,
+    stream: ?Io.net.Stream = null,
+
+    pub fn kill(self: *Link, io: Io) void {
+        self.mutex.lockUncancelable(io);
+        defer self.mutex.unlock(io);
+        if (self.stream) |s| s.shutdown(io, .both) catch {};
+    }
+
+    fn set(self: *Link, io: Io, stream: ?Io.net.Stream) void {
+        self.mutex.lockUncancelable(io);
+        defer self.mutex.unlock(io);
+        self.stream = stream;
+    }
+};
+
 /// Runs one authenticated connection. Returns when the link drops. Never
 /// loops; the caller retries (static mode) or waits for rediscovery.
-pub fn run(io: Io, addr: *const Io.net.IpAddress, vhci_path: []const u8, label: []const u8, psk: *const auth.Psk) !session.Stats {
+pub fn run(io: Io, addr: *const Io.net.IpAddress, vhci_path: []const u8, label: []const u8, psk: *const auth.Psk, link: ?*Link) !session.Stats {
     var stream = try addr.connect(io, .{ .mode = .stream });
     defer stream.close(io);
     try session.tuneSocket(stream.socket.handle);
     log.info("[{s}] connected to {f}, authenticating", .{ label, addr.* });
 
-    handshake.client(io, stream, psk) catch |err| {
-        log.err("[{s}] authentication failed: {s} (wrong key, or not the real board)", .{ label, @errorName(err) });
-        return error.AuthFailed;
+    handshake.client(io, stream, psk) catch |err| switch (err) {
+        error.HandshakeTimeout => {
+            log.warn("[{s}] board did not answer the handshake in time", .{label});
+            return error.HandshakeTimeout;
+        },
+        else => {
+            log.err("[{s}] authentication failed: {s} (wrong key, or not the real board)", .{ label, @errorName(err) });
+            return error.AuthFailed;
+        },
     };
     log.info("[{s}] authenticated", .{label});
+    if (link) |l| l.set(io, stream);
+    defer if (link) |l| l.set(io, null);
 
     // The kernel only sees this peer after it proved it holds the key.
     const vhci = Io.Dir.openFileAbsolute(io, vhci_path, .{ .mode = .read_write }) catch |err| {
