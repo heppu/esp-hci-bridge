@@ -21,11 +21,41 @@ pub const Options = struct {
     /// "bdaddr=hex" entries from `hcibridge claim`. Boards without one are
     /// never attached.
     psk_entries: []const []const u8 = &.{},
+    /// Re-reads the config so a fresh `hcibridge claim` is picked up without a restart.
+    reload_keys: ?*const fn (io: Io, gpa: std.mem.Allocator, cfg_path: []const u8) anyerror!settings.Settings = null,
+    cfg_path: []const u8 = "",
     /// Hosts served by pinned client threads, their announces are ignored.
     pinned: []const []const u8 = &.{},
 };
 
 const max_warned = 256;
+
+const Keys = struct {
+    entries: []const []const u8,
+    loaded: ?settings.Settings = null,
+    last: ?Io.Clock.Timestamp = null,
+
+    /// At most one config re-read per 2 s, so a flood of unknown boards cannot
+    /// turn into a flood of disk reads.
+    fn refresh(self: *Keys, io: Io, gpa: std.mem.Allocator, opts: *const Options) bool {
+        const reload = opts.reload_keys orelse return false;
+        if (self.last) |t| if (t.untilNow(io).raw.toMilliseconds() < 2000) return false;
+        self.last = Io.Clock.Timestamp.now(io, .awake);
+        var fresh = reload(io, gpa, opts.cfg_path) catch |err| {
+            log.warn("config reload failed: {s}", .{@errorName(err)});
+            return false;
+        };
+        if (self.loaded) |*old| old.deinit();
+        self.loaded = fresh;
+        self.entries = fresh.psk;
+        _ = &fresh;
+        return true;
+    }
+
+    fn deinit(self: *Keys) void {
+        if (self.loaded) |*l| l.deinit();
+    }
+};
 
 const Cidr = struct {
     base: u32,
@@ -131,6 +161,8 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: Options) !void {
     var active = Active.init(gpa, io);
     defer active.map.deinit();
     // Unclaimed boards are logged once each, not every 2 s.
+    var keys: Keys = .{ .entries = opts.psk_entries };
+    defer keys.deinit();
     var warned = std.StringHashMap(void).init(gpa);
     defer {
         var it = warned.keyIterator();
@@ -209,21 +241,29 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: Options) !void {
         if (isPinned(pinned.items, from_ip)) continue;
 
         // Only boards we hold a key for, and only announces they signed.
-        const psk = settings.lookupPsk(opts.psk_entries, ann.bdaddr) orelse {
-            if (!warned.contains(ann.bdaddr)) {
-                if (warned.count() >= max_warned) {
-                    var it = warned.keyIterator();
-                    while (it.next()) |k| gpa.free(k.*);
-                    warned.clearRetainingCapacity();
+        const psk = settings.lookupPsk(keys.entries, ann.bdaddr) orelse
+            (if (keys.refresh(io, gpa, &opts)) settings.lookupPsk(keys.entries, ann.bdaddr) else null) orelse
+            {
+                if (!warned.contains(ann.bdaddr)) {
+                    if (warned.count() >= max_warned) {
+                        var it = warned.keyIterator();
+                        while (it.next()) |k| gpa.free(k.*);
+                        warned.clearRetainingCapacity();
+                    }
+                    if (gpa.dupe(u8, ann.bdaddr)) |k| warned.put(k, {}) catch gpa.free(k) else |_| {}
+                    var abuf: [24]u8 = undefined;
+                    const astr = std.fmt.bufPrint(&abuf, "{f}", .{msg.from}) catch "?";
+                    log.warn("ignoring unclaimed board {s} ({s}) at {s}: run `hcibridge claim <ip>` to pair it", .{ ann.name, ann.bdaddr, astr });
                 }
-                if (gpa.dupe(u8, ann.bdaddr)) |k| warned.put(k, {}) catch gpa.free(k) else |_| {}
-                var abuf: [24]u8 = undefined;
-                const astr = std.fmt.bufPrint(&abuf, "{f}", .{msg.from}) catch "?";
-                log.warn("ignoring unclaimed board {s} ({s}) at {s}: run `hcibridge claim <ip>` to pair it", .{ ann.name, ann.bdaddr, astr });
+                continue;
+            };
+        var verified = auth.verifyAnnounce(&psk, ann.bdaddr, ann.port, ann.name, from_ip, ann.sig);
+        if (!verified and keys.refresh(io, gpa, &opts)) {
+            if (settings.lookupPsk(keys.entries, ann.bdaddr)) |fresh| {
+                verified = auth.verifyAnnounce(&fresh, ann.bdaddr, ann.port, ann.name, from_ip, ann.sig);
             }
-            continue;
-        };
-        if (!auth.verifyAnnounce(&psk, ann.bdaddr, ann.port, ann.name, from_ip, ann.sig)) {
+        }
+        if (!verified) {
             log.warn("ignoring announce for {s} with a bad signature (spoofed, replayed, or stale key)", .{ann.bdaddr});
             continue;
         }
