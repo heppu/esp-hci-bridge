@@ -1,6 +1,7 @@
 # /etc/conf.d/hcibridged
-# Board address. IP avoids depending on DNS at boot; change if it moves.
-BRIDGE_HOST="172.16.135.242"
+# Leave BRIDGE_HOST empty for auto-discovery (finds every bridge on the LAN,
+# each gets its own adapter). Set it to pin a single board and skip discovery.
+BRIDGE_HOST=""
 BRIDGE_PORT="4444"
 BRIDGE_VHCI="/dev/vhci"
 # Extra flags, e.g. "--reconnect-ms 500"

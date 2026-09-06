@@ -300,6 +300,69 @@ static void eth_init(void)
     ESP_ERROR_CHECK(esp_eth_start(eth_handle));
 }
 
+// ---------------------------------------------------------------------------
+// LAN discovery: broadcast an announce and answer probes, matching
+// common/discovery.zig ("ESPHCI1\tANNOUNCE\t<bdaddr>\t<port>\t<name>\n").
+// ---------------------------------------------------------------------------
+
+#define DISCOVERY_PORT 4445
+
+static void discovery_task(void *arg)
+{
+    (void)arg;
+    uint8_t mac[6] = {0};
+    esp_read_mac(mac, ESP_MAC_BT);
+    char announce[192];
+    int alen = snprintf(announce, sizeof(announce),
+                        "ESPHCI1\tANNOUNCE\t%02x:%02x:%02x:%02x:%02x:%02x\t%u\t%s\n",
+                        mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
+                        (unsigned)CONFIG_BRIDGE_TCP_PORT, CONFIG_BRIDGE_HOSTNAME);
+
+    int fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (fd < 0) {
+        ESP_LOGE(TAG, "discovery socket failed");
+        vTaskDelete(NULL);
+        return;
+    }
+    int one = 1;
+    setsockopt(fd, SOL_SOCKET, SO_BROADCAST, &one, sizeof(one));
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+
+    struct sockaddr_in local = {
+        .sin_family = AF_INET,
+        .sin_port = htons(DISCOVERY_PORT),
+        .sin_addr.s_addr = htonl(INADDR_ANY),
+    };
+    bind(fd, (struct sockaddr *)&local, sizeof(local));
+
+    struct sockaddr_in bcast = {
+        .sin_family = AF_INET,
+        .sin_port = htons(DISCOVERY_PORT),
+        .sin_addr.s_addr = htonl(INADDR_BROADCAST),
+    };
+
+    // Non-blocking receive so one task can both broadcast and answer probes.
+    struct timeval tv = { .tv_sec = 2, .tv_usec = 0 };
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+    ESP_LOGI(TAG, "discovery announcing on udp %d", DISCOVERY_PORT);
+    while (1) {
+        sendto(fd, announce, alen, 0, (struct sockaddr *)&bcast, sizeof(bcast));
+
+        // Drain any probes that arrived during the 2s window, reply to each.
+        char buf[64];
+        struct sockaddr_in from;
+        socklen_t flen = sizeof(from);
+        int n = recvfrom(fd, buf, sizeof(buf) - 1, 0, (struct sockaddr *)&from, &flen);
+        if (n > 0) {
+            buf[n] = 0;
+            if (strncmp(buf, "ESPHCI1\tPROBE", 13) == 0) {
+                sendto(fd, announce, alen, 0, (struct sockaddr *)&from, flen);
+            }
+        }
+    }
+}
+
 void app_main(void)
 {
     esp_err_t err = nvs_flash_init();
@@ -315,4 +378,5 @@ void app_main(void)
     bt_init();
     bridge_start();
     ota_init();
+    xTaskCreate(discovery_task, "discovery", 4096, NULL, 4, NULL);
 }

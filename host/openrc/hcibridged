@@ -3,7 +3,8 @@
 
 description="ESP32 HCI bridge client"
 command="/usr/local/bin/hcibridged"
-command_args="--host ${BRIDGE_HOST:-esp-hci-bridge} --port ${BRIDGE_PORT:-4444} --vhci ${BRIDGE_VHCI:-/dev/vhci} ${BRIDGE_ARGS:-}"
+# Empty BRIDGE_HOST => discovery mode (find all bridges on the LAN).
+command_args="${BRIDGE_HOST:+--host ${BRIDGE_HOST}} --vhci ${BRIDGE_VHCI:-/dev/vhci} ${BRIDGE_ARGS:-}"
 supervisor="supervise-daemon"
 respawn_delay=2
 respawn_max=0

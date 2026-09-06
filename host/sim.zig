@@ -5,6 +5,7 @@
 const std = @import("std");
 const Io = std.Io;
 const h4 = @import("h4");
+const disc = @import("discovery");
 
 const log = std.log.scoped(.sim);
 
@@ -146,16 +147,51 @@ pub fn serve(io: Io, stream: Io.net.Stream, ctrl: *Controller) !void {
     }
 }
 
+const AnnounceCfg = struct {
+    io: Io,
+    to: Io.net.IpAddress,
+    tcp_port: u16,
+    bdaddr: []const u8,
+    name: []const u8,
+    disc_port: u16,
+};
+
+fn announceLoop(cfg: AnnounceCfg) void {
+    const sock = (Io.net.IpAddress{ .ip4 = .unspecified(0) }).bind(cfg.io, .{ .mode = .dgram, .allow_broadcast = true }) catch |err| {
+        log.warn("announce bind: {s}", .{@errorName(err)});
+        return;
+    };
+    defer sock.close(cfg.io);
+    var buf: [disc.max_datagram]u8 = undefined;
+    const msg = disc.buildAnnounce(&buf, cfg.bdaddr, cfg.tcp_port, cfg.name) catch return;
+    while (true) {
+        sock.send(cfg.io, &cfg.to, msg) catch |err| log.debug("announce send: {s}", .{@errorName(err)});
+        cfg.io.sleep(Io.Duration.fromMilliseconds(2000), .awake) catch {};
+    }
+}
+
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
     var port: u16 = 4444;
+    var bdaddr: []const u8 = "e5:02:00:be:ef:01";
+    var name: []const u8 = "esp-hci-sim";
+    var announce_to: ?[]const u8 = null;
+    var disc_port: u16 = disc.default_port;
     var it = init.minimal.args.iterate();
     _ = it.next();
     while (it.next()) |arg| {
         if (std.mem.eql(u8, arg, "--port")) {
             port = try std.fmt.parseInt(u16, it.next() orelse return error.MissingValue, 10);
+        } else if (std.mem.eql(u8, arg, "--bdaddr")) {
+            bdaddr = it.next() orelse return error.MissingValue;
+        } else if (std.mem.eql(u8, arg, "--name")) {
+            name = it.next() orelse return error.MissingValue;
+        } else if (std.mem.eql(u8, arg, "--announce-to")) {
+            announce_to = it.next() orelse return error.MissingValue;
+        } else if (std.mem.eql(u8, arg, "--discovery-port")) {
+            disc_port = try std.fmt.parseInt(u16, it.next() orelse return error.MissingValue, 10);
         } else {
-            log.err("usage: hcibridge-sim [--port <n>]", .{});
+            log.err("usage: hcibridge-sim [--port n] [--bdaddr x] [--name x] [--announce-to ip:port] [--discovery-port n]", .{});
             return error.BadArgument;
         }
     }
@@ -163,15 +199,36 @@ pub fn main(init: std.process.Init) !void {
     const addr: Io.net.IpAddress = .{ .ip4 = .unspecified(port) };
     var server = try addr.listen(io, .{ .reuse_address = true });
     defer server.deinit(io);
-    log.info("fake controller listening on port {d}", .{port});
+    log.info("fake controller {s} ({s}) listening on tcp {d}", .{ name, bdaddr, port });
+
+    // Announce for discovery. Default target is the LAN broadcast address.
+    const to = if (announce_to) |a| blk: {
+        // Accept "ip" or "ip:port"; fall back to disc_port.
+        var ip = a;
+        var p = disc_port;
+        if (std.mem.lastIndexOfScalar(u8, a, ':')) |c| {
+            ip = a[0..c];
+            p = try std.fmt.parseInt(u16, a[c + 1 ..], 10);
+        }
+        break :blk Io.net.IpAddress{ .ip4 = try Io.net.Ip4Address.parse(ip, p) };
+    } else Io.net.IpAddress{ .ip4 = .{ .bytes = .{ 255, 255, 255, 255 }, .port = disc_port } };
+    var announce = try io.concurrent(announceLoop, .{AnnounceCfg{
+        .io = io,
+        .to = to,
+        .tcp_port = port,
+        .bdaddr = bdaddr,
+        .name = name,
+        .disc_port = disc_port,
+    }});
+    defer _ = announce.cancel(io);
 
     var ctrl: Controller = .{};
     while (true) {
         var stream = try server.accept(io);
         defer stream.close(io);
-        log.info("host connected", .{});
-        serve(io, stream, &ctrl) catch |err| log.warn("session error: {s}", .{@errorName(err)});
-        log.info("host disconnected after {d} commands", .{ctrl.commands});
+        log.info("[{s}] host connected", .{name});
+        serve(io, stream, &ctrl) catch |err| log.warn("[{s}] session error: {s}", .{ name, @errorName(err) });
+        log.info("[{s}] host disconnected after {d} commands", .{ name, ctrl.commands });
     }
 }
 

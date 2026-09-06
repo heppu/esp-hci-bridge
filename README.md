@@ -34,6 +34,17 @@ Ethernet away, powered by PoE.
 Everything with logic is Zig. C is limited to SDK calls that hide behind
 macros or big config structs.
 
+## Discovery and multiple boards
+
+By default `hcibridged` runs in discovery mode: it finds every ESP bridge on
+the LAN by UDP broadcast (port 4445) and gives each its own `/dev/vhci`
+adapter, so bluez sees one controller per board and keeps bonds per board.
+Plug in another board and it appears on its own; power one off and its adapter
+drops. Pass `--host <ip>` to pin a single board and skip discovery.
+
+Each board announces `ESPHCI1<TAB>ANNOUNCE<TAB><bdaddr><TAB><port><TAB><name>`
+every 2s and also answers a probe. The protocol lives in `common/discovery.zig`.
+
 ## Host side
 
 Needs Zig 0.16, kernel with `hci_vhci`, bluez.
@@ -63,8 +74,9 @@ Manual run:
 
 ```
 sudo modprobe hci_vhci
-sudo hcibridged --host 172.16.x.y --port 4444
-bluetoothctl list        # new controller with the ESP32 address
+sudo hcibridged                 # discovery mode, finds all bridges
+sudo hcibridged --host 172.16.x.y   # or pin one board
+bluetoothctl list               # one controller per board
 ```
 
 The daemon reconnects forever. While the link is down it closes `/dev/vhci`

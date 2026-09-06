@@ -10,13 +10,19 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    const discovery = b.addModule("discovery", .{
+        .root_source_file = b.path("common/discovery.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     const daemon = b.addExecutable(.{
         .name = "hcibridged",
         .root_module = b.createModule(.{
             .root_source_file = b.path("host/main.zig"),
             .target = target,
             .optimize = optimize,
-            .imports = &.{.{ .name = "h4", .module = h4 }},
+            .imports = &.{ .{ .name = "h4", .module = h4 }, .{ .name = "discovery", .module = discovery } },
         }),
     });
     b.installArtifact(daemon);
@@ -27,20 +33,20 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("host/sim.zig"),
             .target = target,
             .optimize = optimize,
-            .imports = &.{.{ .name = "h4", .module = h4 }},
+            .imports = &.{ .{ .name = "h4", .module = h4 }, .{ .name = "discovery", .module = discovery } },
         }),
     });
     b.installArtifact(sim);
 
     const test_step = b.step("test", "Run unit and integration tests");
-    const test_roots = [_][]const u8{ "common/h4.zig", "host/main.zig", "host/sim.zig", "host/integration_test.zig" };
+    const test_roots = [_][]const u8{ "common/h4.zig", "common/discovery.zig", "host/main.zig", "host/sim.zig", "host/integration_test.zig" };
     for (test_roots) |root| {
         const t = b.addTest(.{
             .root_module = b.createModule(.{
                 .root_source_file = b.path(root),
                 .target = target,
                 .optimize = optimize,
-                .imports = &.{.{ .name = "h4", .module = h4 }},
+                .imports = &.{ .{ .name = "h4", .module = h4 }, .{ .name = "discovery", .module = discovery } },
             }),
         });
         test_step.dependOn(&b.addRunArtifact(t).step);
