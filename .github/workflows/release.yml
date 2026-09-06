@@ -5,9 +5,7 @@ on:
     tags: ["v*"]
 
 permissions:
-  contents: write
-  pages: write
-  id-token: write
+  contents: read
 
 jobs:
   firmware:
@@ -18,12 +16,16 @@ jobs:
       matrix:
         board: [olimex-esp32-poe, wt32-eth01, generic-wifi]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Fetch Espressif Zig
         run: |
           mkdir -p .tools/zig-xtensa
           curl -sSL https://github.com/kassane/zig-espressif-bootstrap/releases/download/0.16.0-xtensa/zig-relsafe-x86_64-linux-musl-baseline.tar.xz \
             | tar -xJ -C .tools/zig-xtensa --strip-components=1
+      - name: Tag must be on main
+        run: |
+          git fetch --no-tags --depth=200 origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "tag $GITHUB_REF_NAME is not on main"; exit 1; }
       - name: Release signing key
         env:
           KEY: ${{ secrets.FIRMWARE_SIGNING_KEY }}
@@ -49,7 +51,7 @@ jobs:
           cp "$B/bootloader/bootloader.bin" "fw/${{ matrix.board }}/bootloader/"
           cp "$B/partition_table/partition-table.bin" "fw/${{ matrix.board }}/partition_table/"
           cp "$B/ota_data_initial.bin" "fw/${{ matrix.board }}/" 2>/dev/null || true
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: fw-${{ matrix.board }}
           path: fw/
@@ -58,8 +60,8 @@ jobs:
     needs: firmware
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: fw-*
           path: fw
@@ -70,7 +72,7 @@ jobs:
             olimex-esp32-poe=fw/olimex-esp32-poe \
             wt32-eth01=fw/wt32-eth01 \
             generic-wifi=fw/generic-wifi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: site
           path: _site
@@ -78,8 +80,8 @@ jobs:
   cli:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: mlugg/setup-zig@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
         with:
           version: 0.16.0
       - run: zig build test --summary all
@@ -117,7 +119,7 @@ jobs:
           sed -e "s/@PKGVER@/$VER/" packaging/APKBUILD.tmpl > out/APKBUILD
           sed -e "s/@PKGVER@/$VER/" -e "s/@SHA256@/$SHA/" packaging/void-template.tmpl > out/void-template
           ls -1 out/
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: cli
           path: out/
@@ -125,64 +127,57 @@ jobs:
   release:
     needs: [site, cli]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: site
           path: _site
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: cli
           path: cli
-      - name: Package
+      - name: Assemble assets
         run: |
+          mkdir -p release
           # per-board firmware images, named by board
           for b in olimex-esp32-poe wt32-eth01 generic-wifi; do
-            cp "_site/firmware/$b/esp-hci-bridge.bin" "esp-hci-bridge-$b.bin"
-            cp "_site/manifest-$b.json" "manifest-$b.json"
+            cp "_site/firmware/$b/esp-hci-bridge.bin" "release/esp-hci-bridge-$b.bin"
+            cp "_site/manifest-$b.json" "release/manifest-$b.json"
           done
           # shared bootloader/partition table are identical across boards
-          cp _site/firmware/olimex-esp32-poe/bootloader.bin _site/firmware/olimex-esp32-poe/partition-table.bin .
-          chmod +x cli/hcibridge-*
-      - uses: softprops/action-gh-release@v2
+          cp _site/firmware/olimex-esp32-poe/bootloader.bin _site/firmware/olimex-esp32-poe/partition-table.bin release/
+          cp cli/* release/
+          chmod +x release/hcibridge-*
+          cd release && sha256sum * > SHA256SUMS && cat SHA256SUMS
+      - uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
         with:
-          files: |
-            bootloader.bin
-            partition-table.bin
-            esp-hci-bridge-olimex-esp32-poe.bin
-            esp-hci-bridge-wt32-eth01.bin
-            esp-hci-bridge-generic-wifi.bin
-            manifest-olimex-esp32-poe.json
-            manifest-wt32-eth01.json
-            manifest-generic-wifi.json
-            cli/hcibridge-x86_64-linux
-            cli/hcibridge-aarch64-linux
-            cli/hcibridge-armv7-linux
-            cli/hcibridge.1
-            cli/hcibridge.bash
-            cli/_hcibridge
-            cli/hcibridge.fish
-            cli/*.deb
-            cli/*.rpm
-            cli/*.apk
-            cli/PKGBUILD
-            cli/APKBUILD
-            cli/void-template
+          subject-path: release/*
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          files: release/*
+          fail_on_unmatched_files: true
           generate_release_notes: true
 
   pages:
     needs: release
     runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: site
           path: _site
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
         with:
           path: _site
       - id: deploy
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4

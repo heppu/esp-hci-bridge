@@ -2,14 +2,22 @@ name: ci
 
 on:
   push:
+    branches: [main]
   pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   host:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: mlugg/setup-zig@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
         with:
           version: 0.16.0
       - run: zig fmt --check build.zig common host firmware/main
@@ -30,7 +38,7 @@ jobs:
     container:
       image: espressif/idf:v5.5.5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Fetch Espressif Zig
         run: |
           mkdir -p .tools/zig-xtensa
@@ -45,17 +53,19 @@ jobs:
           cd firmware
           if [ -n "$KEY" ]; then printf '%s\n' "$KEY" > secure_boot_signing_key.pem
           else espsecure.py generate_signing_key --version 1 secure_boot_signing_key.pem; fi
-      - name: Build (olimex-esp32-poe + generic-wifi)
+      - name: Build all presets
         shell: bash
         run: |
           . /opt/esp/idf/export.sh
           export ZIG="$PWD/.tools/zig-xtensa/zig"
           cd firmware
-          for b in olimex-esp32-poe generic-wifi; do
+          for b in boards/*.conf; do
+            b=$(basename "$b" .conf)
             idf.py -B "build-$b" -DSDKCONFIG="build-$b/sdkconfig" \
               -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/$b.conf" build
+            espsecure.py verify_signature --version 1 --keyfile secure_boot_signing_key.pem "build-$b/esp-hci-bridge.bin"
           done
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: firmware
           path: |
