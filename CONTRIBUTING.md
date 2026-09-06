@@ -4,7 +4,7 @@ Pull requests are welcome, in particular new board presets in `firmware/boards/`
 
 - `main` is protected. Open a pull request, CI (`host` and `firmware`) must pass,
   and the branch must be up to date before it can be merged (squash or rebase).
-- Run `zig fmt` and `zig build test` before pushing. See the README for building
+- Run `zig fmt` and `zig build test` before pushing. See docs/DEVELOPMENT.md for building
   the firmware in Docker.
 - Keep changes focused. Board support, host daemon, and packaging changes are
   easier to review separately.
