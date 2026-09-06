@@ -13,6 +13,10 @@ echo "building release binary"
 (cd "$ROOT" && zig build -Doptimize=ReleaseSafe)
 install -m 0755 "$ROOT/zig-out/bin/hcibridge" /usr/local/bin/hcibridge
 
+# Stop any hand-run daemon (old or new name) so it does not fight the service
+# for /dev/vhci. Only targets in-tree binaries, not the installed one.
+pkill -f "zig-out/bin/hcibridge" 2>/dev/null || true
+
 # Shell completions and man page, generated from the binary (single source).
 BIN=/usr/local/bin/hcibridge
 if [ -d /usr/share/bash-completion/completions ]; then
