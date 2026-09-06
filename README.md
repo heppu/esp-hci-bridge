@@ -71,25 +71,43 @@ hcibridge man | sudo tee /usr/local/share/man/man1/hcibridge.1
 
 ## Configuration
 
-The daemon reads `/etc/hcibridge/config` and then every `*.conf` in
-`/etc/hcibridge/config.d/` (sorted by name), Linux drop-in style. Scalar keys
-are last-wins; `allow`/`deny` accumulate. Command-line flags override the files.
-Point elsewhere with `--config <path>` (its drop-ins live in `<path>.d/`).
+Every setting has one definition in `host/settings.zig` and can be supplied
+three ways, resolved highest-first:
 
 ```
-# /etc/hcibridge/config
-discovery-port = 4445
-# deny = aa:bb:cc:dd:ee:ff        # never attach this board
-# allow = a0:a3:b3:2f:61:1e       # if any allow lines exist, only these attach
-# host = 172.16.135.242           # pin one board, disable discovery
+flag  >  environment variable  >  config file (+ .d)  >  built-in default
 ```
 
-Drop-ins keep per-board or local tweaks out of the main file, e.g.
+Scalars take the top source; lists (`client`, `allow`, `deny`) accumulate
+across all of them. The config file is `/etc/hcibridge/config` plus every
+`*.conf` in `/etc/hcibridge/config.d/` (sorted, drop-in style); `--config`
+points elsewhere and its drop-ins live in `<path>.d/`.
+
+| setting | flag | env | config key |
+|---|---|---|---|
+| auto-discovery on/off | `--discovery on\|off`, `--no-discovery` | `HCIBRIDGE_DISCOVERY` | `discovery` |
+| discovery listen IP | `--bind` | `HCIBRIDGE_BIND` | `bind` |
+| accept only this IP range | `--subnet` | `HCIBRIDGE_SUBNET` | `subnet` |
+| discovery UDP port | `--discovery-port` | `HCIBRIDGE_DISCOVERY_PORT` | `discovery-port` |
+| default board TCP port | `--port` | `HCIBRIDGE_PORT` | `port` |
+| virtual HCI device | `--vhci` | `HCIBRIDGE_VHCI` | `vhci` |
+| reconnect delay (ms) | `--reconnect-ms` | `HCIBRIDGE_RECONNECT_MS` | `reconnect-ms` |
+| static ESP boards | `--client` (repeat) | `HCIBRIDGE_CLIENTS` (comma) | `client` (repeat) |
+| allowlist by BDADDR | `--allow` (repeat) | `HCIBRIDGE_ALLOW` | `allow` |
+| denylist by BDADDR | `--deny` (repeat) | `HCIBRIDGE_DENY` | `deny` |
+
+`--host <addr>` is sugar for one `client` plus `discovery = off`. Examples:
+
+```
+hcibridge run --subnet 172.16.0.0/16          # only boards on that network
+hcibridge run --no-discovery --client 172.16.135.242
+HCIBRIDGE_DISCOVERY_PORT=4600 hcibridge run   # via environment
+```
+
+Drop a per-board tweak in its own file, e.g.
 `/etc/hcibridge/config.d/10-livingroom.conf` with a single `allow =` line.
-`allow`/`deny` take a board's Bluetooth address (the BDADDR from `hcibridge list`).
-
-Note this native config is separate from the shell env file
-`/etc/hcibridge.conf` that the runit and s6 wrappers source for `BRIDGE_ARGS`.
+This native config is separate from the shell env file `/etc/hcibridge.conf`
+that the runit and s6 wrappers source for `BRIDGE_ARGS`.
 
 ## Discovery and multiple boards
 

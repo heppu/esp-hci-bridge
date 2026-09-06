@@ -3,6 +3,7 @@
 
 const std = @import("std");
 const build_options = @import("build_options");
+const settings = @import("settings.zig");
 
 pub const version = build_options.version;
 pub const program = "hcibridge";
@@ -32,15 +33,6 @@ pub const commands = [_]Cmd{
     .{
         .name = "run",
         .summary = "daemon: attach bridges to the local Bluetooth stack (default)",
-        .opts = &.{
-            .{ .long = "--host", .arg = "addr", .help = "pin a single bridge (name or IP), skip discovery" },
-            .{ .long = "--port", .arg = "n", .help = "bridge TCP port for --host (default 4444)" },
-            .{ .long = "--vhci", .arg = "path", .help = "virtual HCI device (default /dev/vhci)" },
-            .{ .long = "--discovery-port", .arg = "n", .help = "UDP discovery port (default 4445)" },
-            .{ .long = "--reconnect-ms", .arg = "n", .help = "retry delay in --host mode (default 1000)" },
-            .{ .long = "--config", .arg = "path", .help = "config file (default /etc/hcibridge/config; drop-ins in <path>.d/*.conf)" },
-            .{ .long = "--once", .help = "--host mode: exit after the first session" },
-        },
     },
     .{
         .name = "list",
@@ -93,6 +85,8 @@ pub fn writeHelp(w: *std.Io.Writer) !void {
         try w.print("\n{s} options:\n", .{c.name});
         for (c.opts) |o| try writeOptLine(w, o);
     }
+    try w.print("\nrun options:\n", .{});
+    try settings.writeOptions(w);
     try w.print("\nglobal:\n", .{});
     for (global_opts) |o| try writeOptLine(w, o);
 }
@@ -130,6 +124,14 @@ pub fn writeMan(w: *std.Io.Writer) !void {
                 try w.print(".RS\n.TP\n.B {s}\n{s}\n.RE\n", .{ o.long, o.help });
         }
     }
+    try w.print(".SH RUN OPTIONS\n", .{});
+    for (settings.descs) |d| {
+        if (d.arg) |ar|
+            try w.print(".TP\n.B {s} <{s}>\n{s} (env {s})\n", .{ d.flag, ar, d.help, d.env })
+        else
+            try w.print(".TP\n.B {s}\n{s} (env {s})\n", .{ d.flag, d.help, d.env });
+    }
+    try w.print(".TP\n.B --host <addr>\npin one board and disable discovery\n.TP\n.B --config <path>\nconfig file (default /etc/hcibridge/config; .d drop-ins)\n", .{});
     try w.print(".SH EXAMPLES\n.TP\n{s} list\ndiscover bridges and show firmware versions\n.TP\n{s} update all firmware.bin\nupdate every discoverable bridge\n", .{ program, program });
     try w.print(".SH SEE ALSO\n.BR bluetoothctl (1)\n", .{});
 }
@@ -152,6 +154,9 @@ pub fn writeBash(w: *std.Io.Writer) !void {
         for (c.opts, 0..) |o, i| try w.print("{s}{s}", .{ if (i == 0) "" else " ", o.long });
         try w.print("\" -- \"$cur\") );;\n", .{});
     }
+    try w.print("    run) COMPREPLY=( $(compgen -W \"", .{});
+    for (settings.descs, 0..) |d, i| try w.print("{s}{s}", .{ if (i == 0) "" else " ", d.flag });
+    try w.print(" --host --no-discovery --config --once\" -- \"$cur\") );;\n", .{});
     try w.print("    completions) COMPREPLY=( $(compgen -W \"bash zsh fish\" -- \"$cur\") );;\n", .{});
     try w.print("  esac\n}}\ncomplete -F _{s} {s}\n", .{ program, program });
 }
@@ -173,6 +178,14 @@ pub fn writeZsh(w: *std.Io.Writer) !void {
         }
         try w.print("      ;;\n", .{});
     }
+    try w.print("    run) _arguments \\\n", .{});
+    for (settings.descs) |d| {
+        if (d.arg) |ar|
+            try w.print("      '{s}[{s}]:{s}:' \\\n", .{ d.flag, d.help, ar })
+        else
+            try w.print("      '{s}[{s}]' \\\n", .{ d.flag, d.help });
+    }
+    try w.print("      '--host[pin one board]:addr:' '--no-discovery[disable discovery]' '--config[config file]:path:' '--once[exit after first session]' ;;\n", .{});
     try w.print("    completions) _values shell bash zsh fish;;\n", .{});
     try w.print("  esac\n}}\n_{s} \"$@\"\n", .{program});
 }
@@ -192,6 +205,15 @@ pub fn writeFish(w: *std.Io.Writer) !void {
                 try w.print("complete -c {s} -n '__fish_seen_subcommand_from {s}' -l {s} -d '{s}'\n", .{ program, c.name, long, o.help });
         }
     }
+    for (settings.descs) |d| {
+        const long = d.flag[2..];
+        if (d.arg != null)
+            try w.print("complete -c {s} -n '__fish_seen_subcommand_from run' -l {s} -r -d '{s}'\n", .{ program, long, d.help })
+        else
+            try w.print("complete -c {s} -n '__fish_seen_subcommand_from run' -l {s} -d '{s}'\n", .{ program, long, d.help });
+    }
+    try w.print("complete -c {s} -n '__fish_seen_subcommand_from run' -l host -r -d 'pin one board'\n", .{program});
+    try w.print("complete -c {s} -n '__fish_seen_subcommand_from run' -l no-discovery -d 'disable discovery'\n", .{program});
     try w.print("complete -c {s} -n '__fish_seen_subcommand_from completions' -a 'bash zsh fish'\n", .{program});
 }
 

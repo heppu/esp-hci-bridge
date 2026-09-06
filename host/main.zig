@@ -16,24 +16,11 @@ const cli = @import("cli.zig");
 const disc = @import("discovery");
 const spec = @import("spec.zig");
 const config = @import("config.zig");
+const settings = @import("settings.zig");
 
 const log = std.log;
 
 pub const std_options: std.Options = .{ .log_level = .info };
-
-const default_config = "/etc/hcibridge/config";
-
-// Parsed CLI args; null means "not given on the command line" so config can
-// fill it. Precedence: built-in defaults < config file (+ .d) < CLI args.
-const RunArgs = struct {
-    host: ?[]const u8 = null,
-    port: ?u16 = null,
-    vhci: ?[]const u8 = null,
-    discovery_port: ?u16 = null,
-    reconnect_ms: ?u32 = null,
-    once: bool = false,
-    config_path: []const u8 = default_config,
-};
 
 fn printHelp(io: Io, file: Io.File) !void {
     var buf: [4096]u8 = undefined;
@@ -119,78 +106,132 @@ pub fn main(init: std.process.Init) !u8 {
     if (!std.mem.eql(u8, cmd, "run")) {
         // Back-compat: `hcibridge --host x ...` with no subcommand.
         if (std.mem.startsWith(u8, cmd, "-")) {
-            var o = RunArgs{};
-            try parseRun(&o, cmd, &it);
-            while (it.next()) |a| try parseRun(&o, a, &it);
-            return runMode(io, gpa, o);
+            var rest: std.ArrayList([]const u8) = .empty;
+            defer rest.deinit(gpa);
+            try rest.append(gpa, cmd);
+            while (it.next()) |a| try rest.append(gpa, a);
+            return runMode(io, gpa, rest.items, init.environ_map);
         }
         log.err("unknown command: {s}", .{cmd});
         try printHelp(io, Io.File.stderr());
         return 2;
     }
 
-    var o = RunArgs{};
-    while (it.next()) |a| try parseRun(&o, a, &it);
-    return runMode(io, gpa, o);
+    var rest: std.ArrayList([]const u8) = .empty;
+    defer rest.deinit(gpa);
+    while (it.next()) |a| try rest.append(gpa, a);
+    return runMode(io, gpa, rest.items, init.environ_map);
 }
 
-fn parseRun(o: *RunArgs, a: []const u8, it: *std.process.Args.Iterator) !void {
-    if (std.mem.eql(u8, a, "--host")) {
-        o.host = it.next() orelse return error.MissingValue;
-    } else if (std.mem.eql(u8, a, "--port")) {
-        o.port = try std.fmt.parseInt(u16, it.next() orelse return error.MissingValue, 10);
-    } else if (std.mem.eql(u8, a, "--vhci")) {
-        o.vhci = it.next() orelse return error.MissingValue;
-    } else if (std.mem.eql(u8, a, "--discovery-port")) {
-        o.discovery_port = try std.fmt.parseInt(u16, it.next() orelse return error.MissingValue, 10);
-    } else if (std.mem.eql(u8, a, "--reconnect-ms")) {
-        o.reconnect_ms = try std.fmt.parseInt(u32, it.next() orelse return error.MissingValue, 10);
-    } else if (std.mem.eql(u8, a, "--config")) {
-        o.config_path = it.next() orelse return error.MissingValue;
-    } else if (std.mem.eql(u8, a, "--once")) {
-        o.once = true;
-    } else {
-        return error.BadArgument;
+fn envGet(ctx: ?*anyopaque, name: []const u8) ?[]const u8 {
+    const map: *std.process.Environ.Map = @ptrCast(@alignCast(ctx.?));
+    return map.get(name);
+}
+
+const ClientCtx = struct {
+    io: Io,
+    gpa: std.mem.Allocator,
+    host: []const u8,
+    port: u16,
+    vhci: []const u8,
+    reconnect_ms: u32,
+};
+
+fn clientThread(ctx: *ClientCtx) void {
+    while (true) {
+        const addr = Io.net.IpAddress.resolve(ctx.io, ctx.host, ctx.port) catch |err| {
+            log.warn("resolve {s}: {s}", .{ ctx.host, @errorName(err) });
+            ctx.io.sleep(Io.Duration.fromMilliseconds(ctx.reconnect_ms), .awake) catch {};
+            continue;
+        };
+        _ = board.run(ctx.io, &addr, ctx.vhci, ctx.host) catch |err| {
+            log.warn("[{s}] session ended: {s}", .{ ctx.host, @errorName(err) });
+        };
+        ctx.io.sleep(Io.Duration.fromMilliseconds(ctx.reconnect_ms), .awake) catch {};
     }
 }
 
-fn runMode(io: Io, gpa: std.mem.Allocator, o: RunArgs) !u8 {
-    var cfg = config.load(gpa, io, o.config_path) catch |err| blk: {
-        log.warn("config {s}: {s} (using defaults)", .{ o.config_path, @errorName(err) });
-        break :blk config.Config{ .arena = std.heap.ArenaAllocator.init(gpa) };
-    };
-    defer cfg.deinit();
+fn splitHostPort(client: []const u8, default_port: u16) struct { host: []const u8, port: u16 } {
+    if (std.mem.lastIndexOfScalar(u8, client, ':')) |c| {
+        if (std.fmt.parseInt(u16, client[c + 1 ..], 10)) |p| {
+            return .{ .host = client[0..c], .port = p };
+        } else |_| {}
+    }
+    return .{ .host = client, .port = default_port };
+}
 
-    // Resolve with precedence: args, then config, then built-in default.
-    const host = o.host orelse cfg.host;
-    const port = o.port orelse cfg.port orelse 4444;
-    const vhci = o.vhci orelse cfg.vhci orelse "/dev/vhci";
-    const dport = o.discovery_port orelse cfg.discovery_port orelse disc.default_port;
-    const reconnect_ms = o.reconnect_ms orelse cfg.reconnect_ms orelse 1000;
-
-    if (host) |h| {
-        log.info("hcibridge run, pinned to {s}:{d}", .{ h, port });
-        while (true) {
-            const addr = Io.net.IpAddress.resolve(io, h, port) catch |err| {
-                log.warn("resolve {s}: {s}", .{ h, @errorName(err) });
-                try io.sleep(Io.Duration.fromMilliseconds(reconnect_ms), .awake);
-                continue;
-            };
-            _ = board.run(io, &addr, vhci, h) catch |err| {
-                log.warn("session ended: {s}", .{@errorName(err)});
-            };
-            if (o.once) return 0;
-            try io.sleep(Io.Duration.fromMilliseconds(reconnect_ms), .awake);
+fn runMode(io: Io, gpa: std.mem.Allocator, args: []const []const u8, env_map: *std.process.Environ.Map) !u8 {
+    // Config path can be overridden with --config; default is well-known.
+    var cfg_path: []const u8 = "/etc/hcibridge/config";
+    var k: usize = 0;
+    while (k < args.len) : (k += 1) {
+        if (std.mem.eql(u8, args[k], "--config")) {
+            k += 1;
+            if (k >= args.len) return error.MissingValue;
+            cfg_path = args[k];
         }
     }
-    log.info("hcibridge run, discovery mode", .{});
-    try manager.run(io, gpa, .{
-        .discovery_port = dport,
-        .vhci_path = vhci,
-        .allow = cfg.allow.items,
-        .deny = cfg.deny.items,
-    });
-    return 0;
+    // Strip --config from the args handed to the resolver.
+    var filtered: std.ArrayList([]const u8) = .empty;
+    defer filtered.deinit(gpa);
+    var m: usize = 0;
+    while (m < args.len) : (m += 1) {
+        if (std.mem.eql(u8, args[m], "--config")) {
+            m += 1;
+            continue;
+        }
+        try filtered.append(gpa, args[m]);
+    }
+
+    var raw = config.loadRaw(gpa, io, cfg_path) catch |err| blk: {
+        log.warn("config {s}: {s} (using defaults)", .{ cfg_path, @errorName(err) });
+        break :blk config.Raw{ .arena = std.heap.ArenaAllocator.init(gpa) };
+    };
+    defer raw.deinit();
+
+    var s = settings.resolve(gpa, raw.pairs.items, filtered.items, envGet, @ptrCast(env_map)) catch |err| {
+        log.err("bad settings: {s}", .{@errorName(err)});
+        return 2;
+    };
+    defer s.deinit();
+
+    if (s.clients.len == 0 and !s.discovery) {
+        log.err("nothing to do: discovery is off and no clients configured", .{});
+        return 2;
+    }
+
+    // Pinned client boards each get their own reconnecting thread.
+    for (s.clients) |client| {
+        const hp = splitHostPort(client, s.port);
+        const ctx = try gpa.create(ClientCtx);
+        ctx.* = .{ .io = io, .gpa = gpa, .host = hp.host, .port = hp.port, .vhci = s.vhci, .reconnect_ms = s.reconnect_ms };
+        if (s.once and s.clients.len == 1 and !s.discovery) {
+            // one-shot for scripting/tests
+            const addr = try Io.net.IpAddress.resolve(io, hp.host, hp.port);
+            _ = board.run(io, &addr, s.vhci, hp.host) catch {};
+            return 0;
+        }
+        const t = try std.Thread.spawn(.{}, clientThread, .{ctx});
+        t.detach();
+        log.info("pinned board {s}:{d}", .{ hp.host, hp.port });
+    }
+
+    if (s.discovery) {
+        log.info("hcibridge run, discovery on ({s}:{d})", .{ s.bind, s.discovery_port });
+        try manager.run(io, gpa, .{
+            .discovery_port = s.discovery_port,
+            .vhci_path = s.vhci,
+            .bind = s.bind,
+            .subnet = s.subnet,
+            .allow = s.allow,
+            .deny = s.deny,
+        });
+        return 0;
+    }
+
+    // Discovery off but clients running in threads: park forever.
+    log.info("hcibridge run, {d} pinned board(s), discovery off", .{s.clients.len});
+    while (true) try io.sleep(Io.Duration.fromMilliseconds(3600_000), .awake);
 }
 
 test {
@@ -201,4 +242,5 @@ test {
     _ = @import("cli.zig");
     _ = @import("spec.zig");
     _ = @import("config.zig");
+    _ = @import("settings.zig");
 }

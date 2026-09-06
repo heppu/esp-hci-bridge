@@ -12,8 +12,31 @@ pub const Options = struct {
     discovery_port: u16 = disc.default_port,
     vhci_path: []const u8 = "/dev/vhci",
     probe_interval_ms: u32 = 5000,
+    bind: []const u8 = "0.0.0.0",
+    subnet: []const u8 = "",
     allow: []const []const u8 = &.{},
     deny: []const []const u8 = &.{},
+};
+
+const Cidr = struct {
+    base: u32,
+    mask: u32,
+    fn parse(text: []const u8) ?Cidr {
+        const slash = std.mem.indexOfScalar(u8, text, '/') orelse return null;
+        const ip = Io.net.Ip4Address.parse(text[0..slash], 0) catch return null;
+        const bits = std.fmt.parseInt(u5, text[slash + 1 ..], 10) catch {
+            // /32 and larger handled below; u5 maxes at 31
+            const b = std.fmt.parseInt(u8, text[slash + 1 ..], 10) catch return null;
+            if (b != 32) return null;
+            return .{ .base = std.mem.readInt(u32, &ip.bytes, .big), .mask = 0xffffffff };
+        };
+        const mask: u32 = if (bits == 0) 0 else @as(u32, 0xffffffff) << @intCast(32 - @as(u6, bits));
+        return .{ .base = std.mem.readInt(u32, &ip.bytes, .big), .mask = mask };
+    }
+    fn contains(self: Cidr, ip: [4]u8) bool {
+        const v = std.mem.readInt(u32, &ip, .big);
+        return (v & self.mask) == (self.base & self.mask);
+    }
 };
 
 fn permits(opts: Options, bdaddr: []const u8) bool {
@@ -78,7 +101,8 @@ fn boardThread(ctx: *BoardCtx) void {
 pub fn run(io: Io, gpa: std.mem.Allocator, opts: Options) !void {
     var active = Active.init(gpa, io);
 
-    const bind_addr: Io.net.IpAddress = .{ .ip4 = .unspecified(opts.discovery_port) };
+    const bind_ip = Io.net.Ip4Address.parse(opts.bind, opts.discovery_port) catch Io.net.Ip4Address.unspecified(opts.discovery_port);
+    const bind_addr: Io.net.IpAddress = .{ .ip4 = bind_ip };
     const sock = try bind_addr.bind(io, .{ .mode = .dgram, .allow_broadcast = true });
     defer sock.close(io);
     log.info("discovery listening on udp {d}, probing for bridges", .{opts.discovery_port});
@@ -117,6 +141,14 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: Options) !void {
         };
 
         if (!permits(opts, ann.bdaddr)) continue;
+        if (opts.subnet.len > 0) {
+            if (Cidr.parse(opts.subnet)) |cidr| {
+                switch (msg.from) {
+                    .ip4 => |v4| if (!cidr.contains(v4.bytes)) continue,
+                    else => continue,
+                }
+            }
+        }
         if (!active.claim(ann.bdaddr)) continue;
 
         var addr = msg.from;

@@ -1,24 +1,40 @@
 # /etc/hcibridge/config - main configuration for the hcibridge daemon.
 #
+# Every setting can also be given as an environment variable or a CLI flag.
+# Precedence (highest first):  flag  >  env  >  this file (+ .d)  >  default
+#
 # Drop-in fragments in /etc/hcibridge/config.d/*.conf are merged on top of this
-# file, sorted by name. Scalar keys are last-wins; allow/deny accumulate.
-# Command-line flags override everything here.
+# file, sorted by name. Scalars are last-wins; lists (client/allow/deny) add up.
 #
 # Format: key = value   ('#' or ';' begins a comment)
 
-# UDP port used to discover bridges on the LAN.
+# Auto-discover boards on the LAN.            env HCIBRIDGE_DISCOVERY
+# discovery = on
+
+# Address to listen on for discovery.         env HCIBRIDGE_BIND
+# bind = 0.0.0.0
+
+# Only attach boards whose IP is in range.    env HCIBRIDGE_SUBNET
+# subnet = 172.16.0.0/16
+
+# UDP discovery port.                         env HCIBRIDGE_DISCOVERY_PORT
 # discovery-port = 4445
 
-# Virtual HCI device the adapters attach to.
+# Default board TCP port.                     env HCIBRIDGE_PORT
+# port = 4444
+
+# Virtual HCI device.                         env HCIBRIDGE_VHCI
 # vhci = /dev/vhci
 
-# Pin a single board and disable discovery (name or IP):
-# host = 172.16.135.242
-# port = 4444
+# Reconnect delay for pinned boards (ms).     env HCIBRIDGE_RECONNECT_MS
 # reconnect-ms = 1000
 
-# Attach only these boards (allowlist). Omit to attach every board found.
+# Static ESP boards to attach (one per line, repeatable). env HCIBRIDGE_CLIENTS (comma-separated)
+# client = 172.16.135.242
+# client = 172.16.135.243:4444
+
+# Attach only these boards by Bluetooth address (allowlist). env HCIBRIDGE_ALLOW
 # allow = a0:a3:b3:2f:61:1e
 
-# Never attach these boards (deny wins over allow).
+# Never attach these boards (deny wins).      env HCIBRIDGE_DENY
 # deny = aa:bb:cc:dd:ee:ff
