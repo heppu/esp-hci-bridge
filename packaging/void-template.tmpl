@@ -11,7 +11,7 @@ license="MIT"
 homepage="https://github.com/heppu/esp-hci-bridge"
 distfiles="https://github.com/heppu/esp-hci-bridge/archive/refs/tags/v${version}.tar.gz"
 checksum=@SHA256@
-conf_files="/etc/hcibridge/config /etc/hcibridge/config.d/50-example.conf"
+conf_files="/etc/hcibridge/config /etc/hcibridge/config.d/50-example.conf /etc/hcibridge.conf"
 
 do_build() {
 	zig build -Doptimize=ReleaseSafe "-Dversion=v${version}"
@@ -28,10 +28,12 @@ do_install() {
 	vinstall host/config/config.d/50-example.conf 644 etc/hcibridge/config.d 50-example.conf
 	vinstall host/hcibridge.conf 644 etc hcibridge.conf
 	vinstall host/modules-load.conf 644 usr/lib/modules-load.d hci_vhci.conf
-	# runit service (Void's init)
-	vmkdir etc/sv/hcibridge
 	vmkdir etc/sv/hcibridge/log
 	install -m755 host/runit/hcibridge/run "${DESTDIR}/etc/sv/hcibridge/run"
-	install -m755 host/runit/hcibridge/log/run "${DESTDIR}/etc/sv/hcibridge/log/run"
+	# Void logs through vlogger, the generic runit dir in the repo uses svlogd
+	printf '#!/bin/sh\nexec vlogger -t hcibridge\n' > "${DESTDIR}/etc/sv/hcibridge/log/run"
+	chmod 755 "${DESTDIR}/etc/sv/hcibridge/log/run"
+	ln -s /run/runit/supervise.hcibridge "${DESTDIR}/etc/sv/hcibridge/supervise"
+	ln -s /run/runit/supervise.hcibridge-log "${DESTDIR}/etc/sv/hcibridge/log/supervise"
 	vlicense LICENSE
 }

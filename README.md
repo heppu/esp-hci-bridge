@@ -43,8 +43,10 @@ WiFi boards with no saved network start a setup hotspot on first boot: join
 `esp-hci-bridge-setup` from your phone or laptop, open `http://192.168.4.1/`,
 enter your WiFi name and password. The board reboots onto your network.
 
-(Prefer the terminal? Every [release](https://github.com/heppu/esp-hci-bridge/releases/latest)
-also has the raw `.bin` files and an `esptool` command.)
+(Prefer the terminal? The web flasher page lists every `.bin` for your board
+with its flash offset and a ready `esptool` command. Releases carry the same
+files as `esp-hci-bridge-<board>.bin`, `bootloader-<board>.bin`,
+`partition-table.bin`, and `ota_data_initial.bin`.)
 
 ### 2. Install on your PC
 
@@ -104,12 +106,15 @@ fish, all installed by the package.
 
 ### Updating firmware
 
-No cable needed after the first flash. Download the new `esp-hci-bridge.bin`
-from a release and:
+No cable needed after the first flash. Download the new
+`esp-hci-bridge-<board>.bin` for your board from a release and:
 
 ```sh
-hcibridge update all esp-hci-bridge.bin
+hcibridge update all esp-hci-bridge-olimex-esp32-poe.bin
 ```
+
+`update all` sends that one image to every board it finds, so if you run more
+than one board type, update each board by IP with its own image instead.
 
 Boards keep two firmware slots and roll back automatically if an update fails to
 come online. Updates are only accepted from the PC that claimed the board, and
@@ -278,6 +283,11 @@ probes. TCP keepalive drops a dead peer in about ten seconds.
 
 ## Status
 
+> **Upgrading from v0.10.0 to v0.10.2?** Those releases shipped broken zsh and
+> fish completions and, on rpm, a preremove script that stopped and disabled the
+> service on every upgrade. After upgrading to v0.10.3 on rpm, run
+> `systemctl enable --now hcibridge` once.
+>
 > **Upgrading from v0.9.0?** That release could not confirm an OTA-installed
 > image, so boards updated *onto* v0.9.0 refuse further updates and roll back
 > on reset. Power-cycle the board once (it returns to its previous firmware),

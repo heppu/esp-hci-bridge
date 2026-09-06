@@ -21,7 +21,7 @@
 </head>
 <body>
 <h1>esp-hci-bridge</h1>
-<p class="sub">Olimex ESP32-POE as a remote Bluetooth controller over Ethernet.</p>
+<p class="sub">An ESP32 board as a remote Bluetooth controller over Ethernet or WiFi.</p>
 
 <div class="card">
   <p><label>Board: <select id="board"></select></label></p>
@@ -40,12 +40,13 @@
 </div>
 
 <div class="card">
-  <p>After flashing, on the PC:</p>
-<pre>modprobe hci_vhci
-hcibridged --host esp-hci-bridge
-bluetoothctl list</pre>
+  <p>After flashing, on the PC: install the <code>hcibridge</code> package from the <a href="https://github.com/heppu/esp-hci-bridge/releases/latest">latest release</a>, then claim the board.</p>
+<pre>hcibridge list                 # find the board
+sudo hcibridge claim &lt;ip&gt;      # pair it with this PC
+sudo systemctl restart hcibridge   # or: rc-service hcibridged restart</pre>
   <p>Files in this release, with flash offsets for esptool:</p>
   <table id="parts"></table>
+  <pre id="esptool"></pre>
   <p><a href="https://github.com/heppu/esp-hci-bridge">Source and releases</a></p>
 </div>
 
@@ -59,12 +60,16 @@ bluetoothctl list</pre>
       document.getElementById('date').textContent = m.built || '';
       const table = document.getElementById('parts');
       table.innerHTML = '';
+      let cmd = 'esptool --chip esp32 write_flash';
       for (const p of m.builds[0].parts) {
         const row = table.insertRow();
         const name = p.path.split('/').pop();
+        const offset = '0x' + p.offset.toString(16);
         row.insertCell().innerHTML = `<a href="${p.path}">${name}</a>`;
-        row.insertCell().textContent = '0x' + p.offset.toString(16);
+        row.insertCell().textContent = offset;
+        cmd += ` ${offset} ${name}`;
       }
+      document.getElementById('esptool').textContent = cmd;
     }).catch(() => {});
   }
   fetch('boards.json').then(r => r.json()).then(boards => {

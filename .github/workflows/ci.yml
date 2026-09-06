@@ -25,6 +25,13 @@ jobs:
       - run: zig build -Doptimize=ReleaseSafe
       - run: zig build release
       - run: zig build gen
+      - name: Check generated completions
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -qq -y zsh fish
+          bash -n zig-out/gen/hcibridge.bash
+          zsh -n zig-out/gen/_hcibridge
+          fish --no-execute zig-out/gen/hcibridge.fish
       - name: Package smoke test (deb/rpm/apk)
         run: |
           NV=2.44.0
