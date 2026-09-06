@@ -240,7 +240,7 @@ reconnects once a second.
    up, address ...`, `listening on tcp port 4444`.
 2. `nc <ip> 4444` from the PC, then type nothing and close. Monitor shows
    `host connected` and `host disconnected`.
-3. Start `hcibridged --host <ip>`. Monitor shows `host connected`. On the PC
+3. Start `hcibridge run --host <ip>` (or just `hcibridge run`). Monitor shows `host connected`. On the PC
    `bluetoothctl list` shows a new controller with the ESP32 address.
 4. `bluetoothctl`: `select <addr>`, `power on`, `scan on`. Pair the pad.
 5. Watch `stats:` lines in the monitor once a minute for drop counters.
