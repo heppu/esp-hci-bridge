@@ -103,32 +103,32 @@
     <li><button role="tab" aria-selected="false" data-tab="other">Other</button></li>
   </ul>
   <div class="panel" data-panel="deb">
-<pre><code>curl -LO <span class="rel">https://github.com/heppu/esp-hci-bridge/releases/download/<span class="ver">…</span>/hcibridge_<span class="pv">…</span>_amd64.deb</span>
-sudo dpkg -i hcibridge_<span class="pv">…</span>_amd64.deb</code></pre>
+<pre><code>curl -LO https://github.com/heppu/esp-hci-bridge/releases/latest/download/hcibridge_amd64.deb
+sudo dpkg -i hcibridge_amd64.deb</code></pre>
     <p class="meta">Also available: <code>arm64</code> and <code>armhf</code>. Replace <code>amd64</code> in both lines.</p>
   </div>
   <div class="panel" data-panel="rpm" hidden>
-<pre><code>curl -LO <span class="rel">https://github.com/heppu/esp-hci-bridge/releases/download/<span class="ver">…</span>/hcibridge-<span class="pv">…</span>-1.x86_64.rpm</span>
-sudo rpm -i hcibridge-<span class="pv">…</span>-1.x86_64.rpm</code></pre>
+<pre><code>curl -LO https://github.com/heppu/esp-hci-bridge/releases/latest/download/hcibridge.x86_64.rpm
+sudo rpm -i hcibridge.x86_64.rpm</code></pre>
     <p class="meta">Also available: <code>aarch64</code> and <code>armv7hl</code>.</p>
   </div>
   <div class="panel" data-panel="apk" hidden>
-<pre><code>curl -LO <span class="rel">https://github.com/heppu/esp-hci-bridge/releases/download/<span class="ver">…</span>/hcibridge_<span class="pv">…</span>_x86_64.apk</span>
-sudo apk add --allow-untrusted hcibridge_<span class="pv">…</span>_x86_64.apk</code></pre>
+<pre><code>curl -LO https://github.com/heppu/esp-hci-bridge/releases/latest/download/hcibridge_x86_64.apk
+sudo apk add --allow-untrusted hcibridge_x86_64.apk</code></pre>
     <p class="meta">Also available: <code>aarch64</code> and <code>armv7</code>. The service is <code>hcibridged</code> under OpenRC.</p>
   </div>
   <div class="panel" data-panel="arch" hidden>
-<pre><code>curl -LO <span class="rel">https://github.com/heppu/esp-hci-bridge/releases/download/<span class="ver">…</span>/PKGBUILD</span>
+<pre><code>curl -LO https://github.com/heppu/esp-hci-bridge/releases/latest/download/PKGBUILD
 makepkg -si</code></pre>
     <p class="meta">Builds from source, needs <code>zig</code>.</p>
   </div>
   <div class="panel" data-panel="void" hidden>
-<pre><code>curl -LO <span class="rel">https://github.com/heppu/esp-hci-bridge/releases/download/<span class="ver">…</span>/void-template</span>
+<pre><code>curl -LO https://github.com/heppu/esp-hci-bridge/releases/latest/download/void-template
 <span class="c"># drop it into your void-packages checkout as srcpkgs/hcibridge/template, then</span>
 ./xbps-src pkg hcibridge &amp;&amp; sudo xbps-install --repository hostdir/binpkgs hcibridge</code></pre>
   </div>
   <div class="panel" data-panel="other" hidden>
-    <p>Static binaries for x86_64, aarch64, and armv7 are on the <a class="relpage" href="https://github.com/heppu/esp-hci-bridge/releases/latest">release page</a>, along with the man page and shell completions. The install script in the repository sets up the service for systemd, OpenRC, runit, or s6:</p>
+    <p>Static binaries for x86_64, aarch64, and armv7 are on the <a href="https://github.com/heppu/esp-hci-bridge/releases/latest">release page</a>, along with the man page and shell completions. The install script in the repository sets up the service for systemd, OpenRC, runit, or s6:</p>
 <pre><code>git clone https://github.com/heppu/esp-hci-bridge
 cd esp-hci-bridge &amp;&amp; sudo scripts/install-host-service.sh</code></pre>
   </div>
@@ -168,7 +168,7 @@ connect XX:XX:XX:XX:XX:XX</code></pre>
 
 <footer>
   <a href="https://github.com/heppu/esp-hci-bridge">Source</a> ·
-  <a class="relpage" href="https://github.com/heppu/esp-hci-bridge/releases/latest">Releases</a> ·
+  <a href="https://github.com/heppu/esp-hci-bridge/releases/latest">Releases</a> ·
   <a href="https://github.com/heppu/esp-hci-bridge/blob/main/SECURITY.md">Security</a>
 </footer>
 </main>
@@ -211,11 +211,6 @@ connect XX:XX:XX:XX:XX:XX</code></pre>
         cmd += ` ${offset} ${name}`;
       }
       document.getElementById('esptool').textContent = cmd;
-      const ver = m.version;
-      const pv = ver.replace(/^v/, '');
-      for (const e of document.querySelectorAll('.ver')) e.textContent = ver;
-      for (const e of document.querySelectorAll('.pv')) e.textContent = pv;
-      for (const a of document.querySelectorAll('.relpage')) a.href = 'https://github.com/heppu/esp-hci-bridge/releases/tag/' + ver;
     }).catch(() => {});
   }
   fetch('boards.json').then(r => r.json()).then(boards => {
