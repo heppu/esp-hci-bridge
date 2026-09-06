@@ -18,14 +18,14 @@ fn loadKeys(io: Io, gpa: std.mem.Allocator, cfg_path: []const u8) !settings.Sett
     return settings.resolve(gpa, raw.pairs.items, &.{}, null, null);
 }
 
-fn boardInfo(io: Io, gpa: std.mem.Allocator, addr: *const Io.net.IpAddress, bdaddr_out: *[17]u8) !struct { bdaddr: []const u8, claimed: bool } {
+fn boardInfo(io: Io, gpa: std.mem.Allocator, addr: *const Io.net.IpAddress, bdaddr_out: *[17]u8) !struct { bdaddr: []const u8, claimed: ?bool } {
     var r = try httpc.get(io, gpa, addr, "/");
     defer r.deinit(gpa);
     var buf: [32]u8 = undefined;
     const b = httpc.jsonField(r.body, "bdaddr", &buf) orelse return error.NoBdaddr;
     if (b.len != 17) return error.NoBdaddr;
     @memcpy(bdaddr_out, b);
-    return .{ .bdaddr = bdaddr_out, .claimed = httpc.jsonBool(r.body, "claimed") orelse false };
+    return .{ .bdaddr = bdaddr_out, .claimed = httpc.jsonBool(r.body, "claimed") };
 }
 
 const log = std.log;
@@ -173,13 +173,18 @@ fn updateOne(io: Io, gpa: std.mem.Allocator, addr: *const Io.net.IpAddress, imag
         log.err("cannot query {f}: {s}", .{ addr.*, @errorName(err) });
         return false;
     };
-    const psk = settings.lookupPsk(keys.psk, info.bdaddr) orelse {
-        log.err("no key for {s} ({f}): run `hcibridge claim` first", .{ info.bdaddr, addr.* });
-        return false;
-    };
-    log.info("updating {f} ({s}), {d} bytes", .{ addr.*, info.bdaddr, image.len });
+    // Firmware before v0.10 reports no claim state and takes unauthenticated
+    // uploads, which is the only way to move such a board onto keyed firmware.
     var hbuf: [80]u8 = undefined;
-    const hdr = authHeader(&psk, "POST", "/ota", image, &hbuf);
+    var hdr: ?[]const u8 = null;
+    if (info.claimed != null) {
+        const psk = settings.lookupPsk(keys.psk, info.bdaddr) orelse {
+            log.err("no key for {s} ({f}): run `hcibridge claim` first", .{ info.bdaddr, addr.* });
+            return false;
+        };
+        hdr = authHeader(&psk, "POST", "/ota", image, &hbuf);
+    } else log.warn("{f} runs pre-key firmware, sending unauthenticated update", .{addr.*});
+    log.info("updating {f} ({s}), {d} bytes", .{ addr.*, info.bdaddr, image.len });
     var r = httpc.postH(io, gpa, addr, "/ota", image, hdr) catch |err| {
         log.err("  ota failed: {s}", .{@errorName(err)});
         return false;
@@ -261,7 +266,11 @@ pub fn claim(io: Io, gpa: std.mem.Allocator, ip: []const u8, cfg_path: []const u
     } };
     var bd: [17]u8 = undefined;
     const info = try boardInfo(io, gpa, &addr, &bd);
-    if (info.claimed) {
+    const claimed = info.claimed orelse {
+        log.err("{s} ({s}) runs firmware without key support: update it first.", .{ ip, info.bdaddr });
+        return 1;
+    };
+    if (claimed) {
         log.err("{s} ({s}) is already claimed. To re-key it, factory-reset the board first.", .{ ip, info.bdaddr });
         return 1;
     }
