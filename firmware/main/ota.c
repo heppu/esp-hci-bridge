@@ -1,4 +1,5 @@
 #include "glue.h"
+#include "boottrace.h"
 
 #include <string.h>
 
@@ -22,6 +23,7 @@ static esp_timer_handle_t g_rollback_timer;
 
 static esp_err_t status_get(httpd_req_t *req)
 {
+    boottrace_mark(10);
     const esp_app_desc_t *app = esp_app_get_description();
     const esp_partition_t *running = esp_ota_get_running_partition();
     uint8_t mac[6] = {0};
@@ -36,12 +38,12 @@ static esp_err_t status_get(httpd_req_t *req)
     int n = snprintf(body, sizeof(body),
                      "{\"version\":\"%s\",\"idf\":\"%s\",\"partition\":\"%s\","
                      "\"bdaddr\":\"%02x:%02x:%02x:%02x:%02x:%02x\",\"claimed\":%s,\"nonce\":\"%s\",\"uptime_s\":%lld,"
-                     "\"free_heap\":%lu,\"stats\":%s}\n",
+                     "\"prev_stage\":%lu,\"reset\":%d,\"free_heap\":%lu,\"stats\":%s}\n",
                      app->version, app->idf_ver, running ? running->label : "?",
                      mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
                      auth_claimed() ? "true" : "false", nonce,
                      (long long)(esp_timer_get_time() / 1000000),
-                     (unsigned long)esp_get_free_heap_size(), stats);
+                     (unsigned long)boottrace_prev_stage(), boottrace_reset_reason(), (unsigned long)esp_get_free_heap_size(), stats);
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, body, n);
 }
@@ -267,7 +269,6 @@ void ota_init(void)
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &ota_uri));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &reboot_uri));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &claim_uri));
-    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &unclaim_uri));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &unclaim_uri));
     ESP_LOGI(TAG, "http status on /, updates via POST /ota");
 }
