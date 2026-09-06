@@ -88,7 +88,7 @@ by itself.
 | `hcibridge list` | show boards on the network, firmware version, claimed or not |
 | `hcibridge status <ip>` | everything one board reports, including traffic counters |
 | `sudo hcibridge claim <ip>` | pair a new board with this PC |
-| `sudo hcibridge update <ip> <file.bin>` | update a board's firmware over the network |
+| `sudo hcibridge update <ip>` | update a board to the latest release over the network |
 | `sudo hcibridge revoke <bdaddr>` | stop trusting a board, it is dropped at once |
 | `sudo hcibridge unclaim <ip>` | release a board so another PC can claim it |
 | `sudo hcibridge reboot <ip>` | reboot a board |
@@ -98,12 +98,17 @@ is a man page (`man hcibridge`) and completions for bash, zsh, and fish.
 
 ### Updating firmware
 
-No cable needed after the first flash. Download the image for your board type
-from a release, then:
+No cable needed after the first flash:
 
 ```sh
-sudo hcibridge update <ip> esp-hci-bridge-<board>.bin
+sudo hcibridge update <ip>       # one board, or `all` for every board found
 ```
+
+This looks up the latest release, downloads the image for that board's type,
+checks it against the release checksums, and sends it. Boards already on the
+latest release are left alone. To use a specific file instead, give it as the
+second argument. Boards on firmware older than v0.10.9 do not say which type
+they are, so pass `--board <preset>` the first time.
 
 Boards keep two firmware slots. If the new image fails to come up, the board
 returns to the previous one by itself. Only the PC that claimed a board can
