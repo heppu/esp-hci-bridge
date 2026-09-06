@@ -12,7 +12,7 @@ echo "building release binary"
 su - "${SUDO_USER:-${DOAS_USER:-$(logname 2>/dev/null || echo root)}}" -c "cd '$ROOT' && zig build -Doptimize=ReleaseSafe" 2>/dev/null \
     || (cd "$ROOT" && zig build -Doptimize=ReleaseSafe)
 
-install -m 0755 "$ROOT/zig-out/bin/hcibridged" /usr/local/bin/hcibridged
+install -m 0755 "$ROOT/zig-out/bin/hcibridge" /usr/local/bin/hcibridge
 install -m 0755 "$ROOT/host/openrc/hcibridged" /etc/init.d/hcibridged
 if [ ! -f /etc/conf.d/hcibridged ]; then
     install -m 0644 "$ROOT/host/openrc/hcibridged.confd" /etc/conf.d/hcibridged

@@ -34,6 +34,27 @@ Ethernet away, powered by PoE.
 Everything with logic is Zig. C is limited to SDK calls that hide behind
 macros or big config structs.
 
+## One binary, several jobs
+
+`hcibridge` is the whole PC side. Statically linked, no libc, cross-compiled
+for x86_64, aarch64 and armv7 (download from the latest release).
+
+```
+hcibridge run                       daemon (default): attach bridges to bluez
+hcibridge list                      discover bridges, show firmware versions
+hcibridge status <ip>               one bridge's full status
+hcibridge update <ip|all> <file>    push an OTA firmware image
+```
+
+`hcibridge list` example:
+
+```
+NAME               ADDRESS               BDADDR            VERSION      SLOT
+esp-hci-bridge     172.16.135.242:4444   a0:a3:b3:2f:61:1e v0.3.0       ota_0
+```
+
+`hcibridge update all firmware.bin` updates every board it can discover.
+
 ## Discovery and multiple boards
 
 By default `hcibridged` runs in discovery mode: it finds every ESP bridge on

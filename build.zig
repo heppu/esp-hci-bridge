@@ -17,7 +17,7 @@ pub fn build(b: *std.Build) void {
     });
 
     const daemon = b.addExecutable(.{
-        .name = "hcibridged",
+        .name = "hcibridge",
         .root_module = b.createModule(.{
             .root_source_file = b.path("host/main.zig"),
             .target = target,
@@ -39,7 +39,7 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(sim);
 
     const test_step = b.step("test", "Run unit and integration tests");
-    const test_roots = [_][]const u8{ "common/h4.zig", "common/discovery.zig", "host/main.zig", "host/sim.zig", "host/integration_test.zig" };
+    const test_roots = [_][]const u8{ "common/h4.zig", "common/discovery.zig", "host/main.zig", "host/sim.zig", "host/httpc.zig", "host/integration_test.zig" };
     for (test_roots) |root| {
         const t = b.addTest(.{
             .root_module = b.createModule(.{
@@ -90,4 +90,33 @@ pub fn build(b: *std.Build) void {
     const run_sim = b.addRunArtifact(sim);
     if (b.args) |args| run_sim.addArgs(args);
     b.step("sim", "Run the fake controller").dependOn(&run_sim.step);
+
+    // `zig build release` cross-compiles static binaries for common targets.
+    const release_step = b.step("release", "Build static hcibridge for release targets");
+    const triples = [_][]const u8{
+        "x86_64-linux-musl",
+        "aarch64-linux-musl",
+        "arm-linux-musleabihf",
+    };
+    for (triples) |triple| {
+        const rt = b.resolveTargetQuery(std.Target.Query.parse(.{ .arch_os_abi = triple }) catch unreachable);
+        const rmods = struct {
+            fn mod(bb: *std.Build, path: []const u8, t: std.Build.ResolvedTarget) *std.Build.Module {
+                return bb.createModule(.{ .root_source_file = bb.path(path), .target = t, .optimize = .ReleaseSafe });
+            }
+        };
+        const rh4 = rmods.mod(b, "common/h4.zig", rt);
+        const rdisc = rmods.mod(b, "common/discovery.zig", rt);
+        const exe = b.addExecutable(.{
+            .name = "hcibridge",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("host/main.zig"),
+                .target = rt,
+                .optimize = .ReleaseSafe,
+                .imports = &.{ .{ .name = "h4", .module = rh4 }, .{ .name = "discovery", .module = rdisc } },
+            }),
+        });
+        const inst = b.addInstallArtifact(exe, .{ .dest_dir = .{ .override = .{ .custom = triple } } });
+        release_step.dependOn(&inst.step);
+    }
 }

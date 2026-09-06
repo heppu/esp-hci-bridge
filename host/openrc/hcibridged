@@ -1,10 +1,10 @@
 #!/sbin/openrc-run
-# Attaches the remote ESP32 Bluetooth controller to the local bluez stack.
+# Attaches remote ESP32 Bluetooth bridges to the local bluez stack.
 
-description="ESP32 HCI bridge client"
-command="/usr/local/bin/hcibridged"
-# Empty BRIDGE_HOST => discovery mode (find all bridges on the LAN).
-command_args="${BRIDGE_HOST:+--host ${BRIDGE_HOST}} --vhci ${BRIDGE_VHCI:-/dev/vhci} ${BRIDGE_ARGS:-}"
+description="ESP HCI bridge daemon"
+command="/usr/local/bin/hcibridge"
+# Empty BRIDGE_HOST => discovery mode (find every bridge on the LAN).
+command_args="run ${BRIDGE_HOST:+--host ${BRIDGE_HOST}} --vhci ${BRIDGE_VHCI:-/dev/vhci} ${BRIDGE_ARGS:-}"
 supervisor="supervise-daemon"
 respawn_delay=2
 respawn_max=0

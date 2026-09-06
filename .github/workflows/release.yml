@@ -35,7 +35,7 @@ jobs:
           name: site
           path: _site
 
-  host:
+  cli:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -43,14 +43,20 @@ jobs:
         with:
           version: 0.16.0
       - run: zig build test --summary all
-      - run: zig build -Doptimize=ReleaseSafe -Dtarget=x86_64-linux-musl
+      - run: zig build release
+      - name: Collect static binaries
+        run: |
+          mkdir -p out
+          cp zig-out/x86_64-linux-musl/hcibridge   out/hcibridge-x86_64-linux
+          cp zig-out/aarch64-linux-musl/hcibridge  out/hcibridge-aarch64-linux
+          cp zig-out/arm-linux-musleabihf/hcibridge out/hcibridge-armv7-linux
       - uses: actions/upload-artifact@v4
         with:
-          name: host
-          path: zig-out/bin/
+          name: cli
+          path: out/
 
   release:
-    needs: [firmware, host]
+    needs: [firmware, cli]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -59,12 +65,12 @@ jobs:
           path: _site
       - uses: actions/download-artifact@v4
         with:
-          name: host
-          path: host
+          name: cli
+          path: cli
       - name: Package
         run: |
           cp _site/firmware/*.bin _site/manifest.json .
-          tar -C host -czf hcibridged-x86_64-linux-musl.tar.gz hcibridged hcibridge-sim
+          chmod +x cli/hcibridge-*
       - uses: softprops/action-gh-release@v2
         with:
           files: |
@@ -72,7 +78,9 @@ jobs:
             partition-table.bin
             esp-hci-bridge.bin
             manifest.json
-            hcibridged-x86_64-linux-musl.tar.gz
+            cli/hcibridge-x86_64-linux
+            cli/hcibridge-aarch64-linux
+            cli/hcibridge-armv7-linux
           generate_release_notes: true
 
   pages:
