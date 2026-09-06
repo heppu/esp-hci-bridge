@@ -5,63 +5,205 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>esp-hci-bridge</title>
 <style>
-  :root { color-scheme: light dark; }
-  body { font: 16px/1.5 system-ui, sans-serif; max-width: 720px; margin: 3rem auto; padding: 0 1rem; }
-  h1 { margin-bottom: 0; }
-  .sub { color: #888; margin-top: 0; }
-  .card { border: 1px solid #8884; border-radius: 8px; padding: 1rem 1.25rem; margin: 1.5rem 0; }
-  code, pre { font-family: ui-monospace, monospace; background: #8882; padding: 0.1rem 0.3rem; border-radius: 4px; }
-  pre { padding: 0.75rem; overflow-x: auto; }
-  esp-web-install-button { --esp-tools-button-color: #2b6cb0; --esp-tools-button-text-color: #fff; }
-  .warn { border-color: #d69e2e; }
-  table { border-collapse: collapse; }
-  td { padding: 0.2rem 1rem 0.2rem 0; }
+  :root {
+    color-scheme: light dark;
+    --bg: #fafaf9; --fg: #1c1c1a; --muted: #6b6b66; --line: #d9d9d4; --soft: #f0f0ec;
+    --accent: #1f6b4f; --accent-fg: #fff; --warn: #b7791f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #17191a; --fg: #e8e8e4; --muted: #9a9a94; --line: #33363a; --soft: #222527; --accent: #5fbf97; --accent-fg: #0f1a15; --warn: #e6b45a; }
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--fg); font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; }
+  main { max-width: 760px; margin: 0 auto; padding: 2.5rem 1.25rem 5rem; }
+  header { margin-bottom: 2.5rem; }
+  h1 { font-size: 2rem; margin: 0 0 .25rem; }
+  header p { margin: 0; color: var(--muted); font-size: 1.05rem; max-width: 60ch; }
+  section { margin: 0 0 2.75rem; padding-top: 1.5rem; border-top: 1px solid var(--line); }
+  h2 { font-size: 1.35rem; margin: 0 0 .25rem; display: flex; align-items: baseline; gap: .6rem; }
+  h2 .n { color: var(--muted); font-weight: 500; font-size: .95rem; letter-spacing: .04em; }
+  .lede { color: var(--muted); margin: 0 0 1rem; max-width: 62ch; }
+  code, pre { font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; font-size: .92em; }
+  code { background: var(--soft); padding: .1rem .35rem; border-radius: 4px; }
+  pre { background: var(--soft); border: 1px solid var(--line); border-radius: 6px; padding: .8rem 1rem; overflow-x: auto; margin: .6rem 0 1rem; line-height: 1.5; }
+  pre code { background: none; padding: 0; }
+  .c { color: var(--muted); }
+  a { color: var(--accent); }
+  .tabs { display: flex; flex-wrap: wrap; gap: .25rem; border-bottom: 1px solid var(--line); margin: 1rem 0 0; padding: 0; list-style: none; }
+  .tabs button { background: none; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; padding: .5rem .8rem; font: inherit; color: var(--muted); cursor: pointer; }
+  .tabs button:hover { color: var(--fg); }
+  .tabs button[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); font-weight: 600; }
+  .tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+  .panel { padding-top: 1rem; }
+  .panel[hidden] { display: none; }
+  .note { border-left: 3px solid var(--line); padding: .25rem 0 .25rem 1rem; color: var(--muted); margin: 1rem 0; }
+  .note.warn { border-left-color: var(--warn); color: var(--fg); }
+  esp-web-install-button { --esp-tools-button-color: var(--accent); --esp-tools-button-text-color: var(--accent-fg); --esp-tools-button-border-radius: 6px; }
+  .flash { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem; margin: .75rem 0 .5rem; }
+  .meta { color: var(--muted); font-size: .92rem; }
+  table { border-collapse: collapse; margin: .5rem 0 1rem; }
+  td, th { padding: .3rem 1.2rem .3rem 0; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 500; font-size: .9rem; }
+  ul { padding-left: 1.2rem; }
+  li { margin: .25rem 0; }
+  footer { color: var(--muted); font-size: .92rem; border-top: 1px solid var(--line); padding-top: 1.25rem; }
 </style>
 <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
 </head>
 <body>
-<h1>esp-hci-bridge</h1>
-<p class="sub">An ESP32 board as a remote Bluetooth controller over Ethernet or WiFi.</p>
+<main>
+<header>
+  <h1>esp-hci-bridge</h1>
+  <p>A remote Bluetooth adapter for Linux. Flash a board here, install the PC tool, claim the board, pair your devices. Five minutes, no cables after the first step.</p>
+</header>
 
-<div class="card">
-  <p><label>Board: <select id="board"></select></label></p>
-  <p id="boarddesc" style="color:#888;margin-top:0"></p>
-  <p>Firmware <strong id="version">…</strong>, built <span id="date">…</span>.</p>
-  <esp-web-install-button id="install" manifest="manifest.json">
-    <span slot="unsupported">Needs Chromium, Chrome or Edge. Firefox has no Web Serial.</span>
-    <span slot="not-allowed">Open this page over HTTPS or localhost.</span>
-  </esp-web-install-button>
-  <p>Plug the board's micro USB into this computer, click Install, pick the CH340 port. The dialog also has a serial console for watching boot logs.</p>
-</div>
+<section id="flash">
+  <h2><span class="n">STEP 1</span> Flash the board</h2>
+  <p class="lede">Pick your board, plug it into this computer over USB, and click Install. Firmware <strong id="version">…</strong>, built <span id="date">…</span>.</p>
 
-<div class="card warn">
-  <p><strong>Non ISO ESP32-POE:</strong> unplug PoE before connecting USB. Olimex warns the missing isolation can damage the PC.</p>
-  <p><strong>Linux:</strong> your user needs access to <code>/dev/ttyUSB0</code>, usually group <code>dialout</code> or <code>uucp</code>. Flatpak browsers need <code>--device=all</code>.</p>
-</div>
+  <ul class="tabs" role="tablist" id="boardtabs" aria-label="Board"></ul>
+  <div class="panel">
+    <p class="meta" id="boarddesc"></p>
 
-<div class="card">
-  <p>After flashing, on the PC: install the <code>hcibridge</code> package from the <a href="https://github.com/heppu/esp-hci-bridge/releases/latest">latest release</a>, then claim the board.</p>
-<pre>hcibridge list                 # find the board
-sudo hcibridge claim &lt;ip&gt;      # pair it with this PC, the daemon picks it up by itself</pre>
-  <p>Files in this release, with flash offsets for esptool:</p>
-  <table id="parts"></table>
-  <pre id="esptool"></pre>
-  <p><a href="https://github.com/heppu/esp-hci-bridge">Source and releases</a></p>
-</div>
+    <ul class="tabs" role="tablist" aria-label="Flash method" data-group="method">
+      <li><button role="tab" aria-selected="true" data-tab="web">Web flasher</button></li>
+      <li><button role="tab" aria-selected="false" data-tab="esptool">esptool</button></li>
+    </ul>
+    <div class="panel" data-panel="web">
+      <div class="flash">
+        <esp-web-install-button id="install" manifest="manifest.json">
+          <span slot="unsupported">Needs Chrome, Chromium, or Edge. Firefox and Safari have no Web Serial.</span>
+          <span slot="not-allowed">Open this page over HTTPS.</span>
+        </esp-web-install-button>
+        <span class="meta">Pick the board's serial port in the dialog. The dialog also has a console for watching boot logs.</span>
+      </div>
+      <div class="note">On Linux your user needs access to the serial device, usually by being in the <code>dialout</code> or <code>uucp</code> group. A Flatpak browser needs <code>--device=all</code>.</div>
+    </div>
+    <div class="panel" data-panel="esptool" hidden>
+      <p>Download the files and flash them at these offsets:</p>
+      <table><thead><tr><th>file</th><th>offset</th></tr></thead><tbody id="parts"></tbody></table>
+      <pre id="esptool"></pre>
+    </div>
+
+    <div class="note warn" id="poe-note">On the non-ISO Olimex ESP32-POE, unplug PoE before connecting USB. Olimex warns the missing isolation can damage the PC.</div>
+    <div class="note" id="wifi-note" hidden>WiFi boards start a setup hotspot after flashing. Join <code>esp-hci-bridge-setup</code> from a phone or laptop, open <code>http://192.168.4.1/</code>, and enter your WiFi name and password. The board reboots onto your network.</div>
+  </div>
+</section>
+
+<section id="install-pc">
+  <h2><span class="n">STEP 2</span> Install on the PC</h2>
+  <p class="lede">One package. It installs the <code>hcibridge</code> command and a background service that starts on boot and finds boards on its own.</p>
+
+  <ul class="tabs" role="tablist" aria-label="Distribution" data-group="distro">
+    <li><button role="tab" aria-selected="true" data-tab="deb">Debian, Ubuntu</button></li>
+    <li><button role="tab" aria-selected="false" data-tab="rpm">Fedora, RHEL</button></li>
+    <li><button role="tab" aria-selected="false" data-tab="apk">Alpine</button></li>
+    <li><button role="tab" aria-selected="false" data-tab="arch">Arch</button></li>
+    <li><button role="tab" aria-selected="false" data-tab="void">Void</button></li>
+    <li><button role="tab" aria-selected="false" data-tab="other">Other</button></li>
+  </ul>
+  <div class="panel" data-panel="deb">
+<pre><code>curl -LO <span class="rel">https://github.com/heppu/esp-hci-bridge/releases/download/<span class="ver">…</span>/hcibridge_<span class="pv">…</span>_amd64.deb</span>
+sudo dpkg -i hcibridge_<span class="pv">…</span>_amd64.deb</code></pre>
+    <p class="meta">Also available: <code>arm64</code> and <code>armhf</code>. Replace <code>amd64</code> in both lines.</p>
+  </div>
+  <div class="panel" data-panel="rpm" hidden>
+<pre><code>curl -LO <span class="rel">https://github.com/heppu/esp-hci-bridge/releases/download/<span class="ver">…</span>/hcibridge-<span class="pv">…</span>-1.x86_64.rpm</span>
+sudo rpm -i hcibridge-<span class="pv">…</span>-1.x86_64.rpm</code></pre>
+    <p class="meta">Also available: <code>aarch64</code> and <code>armv7hl</code>.</p>
+  </div>
+  <div class="panel" data-panel="apk" hidden>
+<pre><code>curl -LO <span class="rel">https://github.com/heppu/esp-hci-bridge/releases/download/<span class="ver">…</span>/hcibridge_<span class="pv">…</span>_x86_64.apk</span>
+sudo apk add --allow-untrusted hcibridge_<span class="pv">…</span>_x86_64.apk</code></pre>
+    <p class="meta">Also available: <code>aarch64</code> and <code>armv7</code>. The service is <code>hcibridged</code> under OpenRC.</p>
+  </div>
+  <div class="panel" data-panel="arch" hidden>
+<pre><code>curl -LO <span class="rel">https://github.com/heppu/esp-hci-bridge/releases/download/<span class="ver">…</span>/PKGBUILD</span>
+makepkg -si</code></pre>
+    <p class="meta">Builds from source, needs <code>zig</code>.</p>
+  </div>
+  <div class="panel" data-panel="void" hidden>
+<pre><code>curl -LO <span class="rel">https://github.com/heppu/esp-hci-bridge/releases/download/<span class="ver">…</span>/void-template</span>
+<span class="c"># drop it into your void-packages checkout as srcpkgs/hcibridge/template, then</span>
+./xbps-src pkg hcibridge &amp;&amp; sudo xbps-install --repository hostdir/binpkgs hcibridge</code></pre>
+  </div>
+  <div class="panel" data-panel="other" hidden>
+    <p>Static binaries for x86_64, aarch64, and armv7 are on the <a class="relpage" href="https://github.com/heppu/esp-hci-bridge/releases/latest">release page</a>, along with the man page and shell completions. The install script in the repository sets up the service for systemd, OpenRC, runit, or s6:</p>
+<pre><code>git clone https://github.com/heppu/esp-hci-bridge
+cd esp-hci-bridge &amp;&amp; sudo scripts/install-host-service.sh</code></pre>
+  </div>
+</section>
+
+<section id="claim">
+  <h2><span class="n">STEP 3</span> Claim the board</h2>
+  <p class="lede">A fresh board talks to nobody until a PC claims it. Claiming exchanges a key once, over the network. The service picks the key up by itself.</p>
+<pre><code>hcibridge list               <span class="c"># find the board, KEY column says unclaimed</span>
+sudo hcibridge claim &lt;ip&gt;    <span class="c"># pair it with this PC</span></code></pre>
+  <p>A few seconds later the board is a Bluetooth adapter on this PC. A claimed board refuses every other claim.</p>
+</section>
+
+<section id="pair">
+  <h2><span class="n">STEP 4</span> Pair your devices</h2>
+  <p class="lede">The board is a normal adapter now. Pair with whatever you usually use, for example:</p>
+<pre><code>bluetoothctl
+scan on                      <span class="c"># press the pairing button on the device</span>
+pair XX:XX:XX:XX:XX:XX
+trust XX:XX:XX:XX:XX:XX
+connect XX:XX:XX:XX:XX:XX</code></pre>
+  <p>Pairings are stored on the board, so devices reconnect on their own after a reboot of either side.</p>
+  <div class="note">Xbox controllers need current controller firmware to pair. Update through an Xbox or the Xbox Accessories app on Windows.</div>
+</section>
+
+<section id="after">
+  <h2>That is it</h2>
+  <p class="lede">The service handles boards coming and going. The few commands you might need later:</p>
+  <table>
+    <tr><td><code>hcibridge status &lt;ip&gt;</code></td><td>everything a board reports, including traffic and drop counters</td></tr>
+    <tr><td><code>sudo hcibridge update &lt;ip&gt; &lt;file.bin&gt;</code></td><td>new firmware over the network, the board rolls back by itself if it fails</td></tr>
+    <tr><td><code>sudo hcibridge revoke &lt;bdaddr&gt;</code></td><td>stop trusting a board</td></tr>
+    <tr><td><code>sudo hcibridge unclaim &lt;ip&gt;</code></td><td>release a board so another PC can claim it</td></tr>
+  </table>
+  <p>Problems? The <a href="https://github.com/heppu/esp-hci-bridge#troubleshooting">troubleshooting section</a> covers the ones seen so far.</p>
+</section>
+
+<footer>
+  <a href="https://github.com/heppu/esp-hci-bridge">Source</a> ·
+  <a class="relpage" href="https://github.com/heppu/esp-hci-bridge/releases/latest">Releases</a> ·
+  <a href="https://github.com/heppu/esp-hci-bridge/blob/main/SECURITY.md">Security</a>
+</footer>
+</main>
 
 <script>
-  const sel = document.getElementById('board');
+  // Generic tabs: buttons with data-tab inside a [data-group] list switch the
+  // sibling panels with matching data-panel. Choice is remembered per group.
+  function wireTabs(list) {
+    const group = list.dataset.group;
+    const scope = list.parentElement;
+    const buttons = [...list.querySelectorAll('button[role=tab]')];
+    const show = (id, remember) => {
+      for (const b of buttons) b.setAttribute('aria-selected', String(b.dataset.tab === id));
+      for (const p of scope.querySelectorAll(':scope > .panel[data-panel]')) p.hidden = p.dataset.panel !== id;
+      if (remember) try { localStorage.setItem('tab:' + group, id); } catch (e) {}
+    };
+    for (const b of buttons) b.addEventListener('click', () => show(b.dataset.tab, true));
+    let saved = null;
+    try { saved = localStorage.getItem('tab:' + group); } catch (e) {}
+    show(buttons.some(b => b.dataset.tab === saved) ? saved : buttons[0].dataset.tab, false);
+  }
+  for (const l of document.querySelectorAll('.tabs[data-group]')) wireTabs(l);
+
+  // Board tabs come from boards.json, each selects its own manifest.
   const btn = document.getElementById('install');
   function loadManifest(id) {
     btn.setAttribute('manifest', 'manifest-' + id + '.json');
     fetch('manifest-' + id + '.json').then(r => r.json()).then(m => {
       document.getElementById('version').textContent = m.version;
-      document.getElementById('date').textContent = m.built || '';
-      const table = document.getElementById('parts');
-      table.innerHTML = '';
+      document.getElementById('date').textContent = (m.built || '').replace('T', ' ').replace('Z', ' UTC');
+      const body = document.getElementById('parts');
+      body.innerHTML = '';
       let cmd = 'esptool --chip esp32 write_flash';
       for (const p of m.builds[0].parts) {
-        const row = table.insertRow();
+        const row = body.insertRow();
         const name = p.path.split('/').pop();
         const offset = '0x' + p.offset.toString(16);
         row.insertCell().innerHTML = `<a href="${p.path}">${name}</a>`;
@@ -69,20 +211,40 @@ sudo hcibridge claim &lt;ip&gt;      # pair it with this PC, the daemon picks it
         cmd += ` ${offset} ${name}`;
       }
       document.getElementById('esptool').textContent = cmd;
+      const ver = m.version;
+      const pv = ver.replace(/^v/, '');
+      for (const e of document.querySelectorAll('.ver')) e.textContent = ver;
+      for (const e of document.querySelectorAll('.pv')) e.textContent = pv;
+      for (const a of document.querySelectorAll('.relpage')) a.href = 'https://github.com/heppu/esp-hci-bridge/releases/tag/' + ver;
     }).catch(() => {});
   }
   fetch('boards.json').then(r => r.json()).then(boards => {
+    const list = document.getElementById('boardtabs');
+    list.dataset.group = 'board';
     for (const b of boards) {
-      const o = document.createElement('option');
-      o.value = b.id; o.textContent = b.id; o.dataset.desc = b.desc;
-      sel.appendChild(o);
+      const li = document.createElement('li');
+      const bt = document.createElement('button');
+      bt.setAttribute('role', 'tab');
+      bt.dataset.tab = b.id;
+      bt.dataset.desc = b.desc || '';
+      bt.textContent = b.id;
+      li.appendChild(bt);
+      list.appendChild(li);
     }
-    const pick = () => {
-      document.getElementById('boarddesc').textContent = sel.selectedOptions[0].dataset.desc || '';
-      loadManifest(sel.value);
+    const buttons = [...list.querySelectorAll('button')];
+    const pick = (id, remember) => {
+      for (const b of buttons) b.setAttribute('aria-selected', String(b.dataset.tab === id));
+      const cur = buttons.find(b => b.dataset.tab === id);
+      document.getElementById('boarddesc').textContent = cur ? cur.dataset.desc : '';
+      document.getElementById('wifi-note').hidden = !/wifi/i.test(id);
+      document.getElementById('poe-note').hidden = !/poe/i.test(id);
+      loadManifest(id);
+      if (remember) try { localStorage.setItem('tab:board', id); } catch (e) {}
     };
-    sel.addEventListener('change', pick);
-    pick();
+    for (const b of buttons) b.addEventListener('click', () => pick(b.dataset.tab, true));
+    let saved = null;
+    try { saved = localStorage.getItem('tab:board'); } catch (e) {}
+    pick(buttons.some(b => b.dataset.tab === saved) ? saved : boards[0].id, false);
   }).catch(() => loadManifest('olimex-esp32-poe'));
 </script>
 </body>
