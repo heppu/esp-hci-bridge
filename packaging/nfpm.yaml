@@ -58,6 +58,8 @@ overrides:
     contents:
       - src: host/openrc/hcibridged
         dst: /etc/init.d/hcibridged
+        file_info:
+          mode: 0755
       - src: host/openrc/hcibridged.confd
         dst: /etc/conf.d/hcibridged
         type: config|noreplace
