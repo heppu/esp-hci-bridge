@@ -8,6 +8,10 @@ menu "HCI bridge"
         string "DHCP hostname"
         default "esp-hci-bridge"
 
+    config BRIDGE_BOARD_ID
+        string "Board preset name, matches the release image name"
+        default "custom"
+
     config BRIDGE_NET_WIFI
         bool "Use WiFi instead of Ethernet"
         default n

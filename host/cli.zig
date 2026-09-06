@@ -5,6 +5,7 @@ const Io = std.Io;
 const disc = @import("discovery");
 const auth = @import("auth");
 const httpc = @import("httpc.zig");
+const release = @import("release.zig");
 const config = @import("config.zig");
 const settings = @import("settings.zig");
 const X25519 = std.crypto.dh.X25519;
@@ -41,6 +42,18 @@ const BoardInfo = struct {
     claimed: ?bool,
     /// null: firmware before v0.10.3 (replayable proofs, see auth.httpAuthLegacy)
     nonce: ?auth.HttpNonce,
+    version_buf: [32]u8 = undefined,
+    version_len: usize = 0,
+    board_buf: [48]u8 = undefined,
+    board_len: usize = 0,
+
+    fn version(self: *const BoardInfo) []const u8 {
+        return self.version_buf[0..self.version_len];
+    }
+    /// null: firmware before v0.10.9, which does not say which preset it is
+    fn board(self: *const BoardInfo) ?[]const u8 {
+        return if (self.board_len == 0) null else self.board_buf[0..self.board_len];
+    }
 };
 
 fn boardInfo(io: Io, gpa: std.mem.Allocator, addr: *const Io.net.IpAddress, bdaddr_out: *[17]u8) !BoardInfo {
@@ -52,7 +65,18 @@ fn boardInfo(io: Io, gpa: std.mem.Allocator, addr: *const Io.net.IpAddress, bdad
     @memcpy(bdaddr_out, b);
     var nbuf: [48]u8 = undefined;
     const nonce = if (httpc.jsonField(r.body, "nonce", &nbuf)) |h| auth.hexToNonce(h) else null;
-    return .{ .bdaddr = bdaddr_out, .claimed = httpc.jsonBool(r.body, "claimed"), .nonce = nonce };
+    var info: BoardInfo = .{ .bdaddr = bdaddr_out, .claimed = httpc.jsonBool(r.body, "claimed"), .nonce = nonce };
+    var vbuf: [32]u8 = undefined;
+    if (httpc.jsonField(r.body, "version", &vbuf)) |v| {
+        @memcpy(info.version_buf[0..v.len], v);
+        info.version_len = v.len;
+    }
+    var bbuf: [48]u8 = undefined;
+    if (httpc.jsonField(r.body, "board", &bbuf)) |v| {
+        @memcpy(info.board_buf[0..v.len], v);
+        info.board_len = v.len;
+    }
+    return info;
 }
 
 const log = std.log;
@@ -226,12 +250,71 @@ fn updateOne(io: Io, gpa: std.mem.Allocator, addr: *const Io.net.IpAddress, imag
     return true;
 }
 
-pub fn update(io: Io, gpa: std.mem.Allocator, target: []const u8, path: []const u8, discovery_port: u16, cfg_path: []const u8) !u8 {
-    const image = readFile(io, gpa, path) catch |err| {
-        log.err("cannot read {s}: {s}", .{ path, @errorName(err) });
-        return 1;
+/// Images for the latest release, fetched once per board preset.
+const LatestImages = struct {
+    client: std.http.Client,
+    rel: release.Latest,
+    cache: std.StringHashMap([]u8),
+    gpa: std.mem.Allocator,
+
+    fn init(io: Io, gpa: std.mem.Allocator) !LatestImages {
+        var client: std.http.Client = .{ .allocator = gpa, .io = io };
+        errdefer client.deinit();
+        log.info("checking the latest release of {s}", .{release.repo});
+        const rel = try release.latest(&client, gpa);
+        return .{ .client = client, .rel = rel, .cache = std.StringHashMap([]u8).init(gpa), .gpa = gpa };
+    }
+
+    fn deinit(self: *LatestImages) void {
+        var it = self.cache.iterator();
+        while (it.next()) |e| {
+            self.gpa.free(e.key_ptr.*);
+            self.gpa.free(e.value_ptr.*);
+        }
+        self.cache.deinit();
+        self.rel.deinit();
+        self.client.deinit();
+    }
+
+    fn image(self: *LatestImages, board: []const u8) ![]const u8 {
+        if (self.cache.get(board)) |img| return img;
+        log.info("downloading {s} firmware for {s}", .{ self.rel.tag, board });
+        const img = try self.rel.image(&self.client, self.gpa, board);
+        errdefer self.gpa.free(img);
+        const key = try self.gpa.dupe(u8, board);
+        errdefer self.gpa.free(key);
+        try self.cache.put(key, img);
+        return img;
+    }
+};
+
+/// Picks the image for one board: the given file, or the latest release for
+/// the board's preset. Returns null when the board is already on that release.
+fn imageFor(io: Io, gpa: std.mem.Allocator, addr: *const Io.net.IpAddress, file_image: ?[]const u8, latest_images: *?LatestImages, board_override: ?[]const u8) !?[]const u8 {
+    if (file_image) |img| return img;
+    var bd: [17]u8 = undefined;
+    const info = try boardInfo(io, gpa, addr, &bd);
+    const board = board_override orelse info.board() orelse {
+        log.err("{f} runs firmware that does not say which board it is: pass --board <preset> or a file", .{addr.*});
+        return error.UnknownBoard;
     };
-    defer gpa.free(image);
+    if (latest_images.* == null) latest_images.* = try LatestImages.init(io, gpa);
+    const li = &latest_images.*.?;
+    if (std.mem.eql(u8, info.version(), li.rel.tag)) {
+        log.info("{f} ({s}) already runs {s}", .{ addr.*, board, li.rel.tag });
+        return null;
+    }
+    return try li.image(board);
+}
+
+pub fn update(io: Io, gpa: std.mem.Allocator, target: []const u8, path: ?[]const u8, board_override: ?[]const u8, discovery_port: u16, cfg_path: []const u8) !u8 {
+    const file_image: ?[]const u8 = if (path) |p| readFile(io, gpa, p) catch |err| {
+        log.err("cannot read {s}: {s}", .{ p, @errorName(err) });
+        return 1;
+    } else null;
+    defer if (file_image) |img| gpa.free(img);
+    var latest_images: ?LatestImages = null;
+    defer if (latest_images) |*li| li.deinit();
     var keys = try loadKeys(io, gpa, cfg_path);
     defer keys.deinit();
 
@@ -246,9 +329,16 @@ pub fn update(io: Io, gpa: std.mem.Allocator, target: []const u8, path: []const 
         for (bridges) |*b| {
             var a = b.addr;
             a.setPort(80);
-            if (updateOne(io, gpa, &a, image, &keys)) ok += 1;
+            const img = imageFor(io, gpa, &a, file_image, &latest_images, board_override) catch |err| {
+                log.err("{f}: {s}", .{ a, @errorName(err) });
+                continue;
+            } orelse {
+                ok += 1;
+                continue;
+            };
+            if (updateOne(io, gpa, &a, img, &keys)) ok += 1;
         }
-        log.info("updated {d}/{d} bridges", .{ ok, bridges.len });
+        log.info("{d}/{d} bridges up to date", .{ ok, bridges.len });
         return if (ok == bridges.len) 0 else 1;
     }
 
@@ -256,7 +346,11 @@ pub fn update(io: Io, gpa: std.mem.Allocator, target: []const u8, path: []const 
         log.err("target must be an IPv4 address or 'all'", .{});
         return 2;
     } };
-    return if (updateOne(io, gpa, &addr, image, &keys)) 0 else 1;
+    const img = imageFor(io, gpa, &addr, file_image, &latest_images, board_override) catch |err| {
+        log.err("{f}: {s}", .{ addr, @errorName(err) });
+        return 1;
+    } orelse return 0;
+    return if (updateOne(io, gpa, &addr, img, &keys)) 0 else 1;
 }
 
 fn dropinPath(cfg_path: []const u8, bdaddr: []const u8, buf: *[512]u8) ![]const u8 {
