@@ -1,337 +1,194 @@
 # esp-hci-bridge
 
-Turns an Olimex ESP32-POE into a remote Bluetooth controller for a Linux
-machine. The ESP32 runs only the Bluetooth controller (radio and link layer)
-and ships raw HCI packets over TCP. The PC runs the full bluez stack against
-a virtual HCI device, so pairing, HID, xpadneo, keyboards and mice all work
-exactly as with a local USB dongle. The dongle just happens to be 100 m of
-Ethernet away, powered by PoE.
+Use Bluetooth devices that are nowhere near your computer.
+
+A tiny, cheap ESP32 board acts as a remote Bluetooth radio. Put it wherever your
+game controller, keyboard, or mouse actually is (the living room, 100 m of
+Ethernet away) and your Linux PC talks to those devices as if the Bluetooth
+adapter were built in. Pairing, input, and reconnection all work through normal
+BlueZ, because to your PC it *is* a normal Bluetooth controller.
+
+Built for playing PC games on the couch: the PC drives the TV over a long HDMI
+cable, and this puts the gamepad's Bluetooth where you are sitting instead of
+back at the machine.
 
 ```
- Xbox pad, keyboard, mouse
-          |  Bluetooth
-   +------+------+          TCP, H4 framed HCI          +-----------------+
-   | ESP32-POE   | <----------------------------------> | PC              |
-   | BT ctrl only|   port 4444                          | hcibridge run   |
-   | bridge.zig  |                                      |   -> /dev/vhci  |
-   +-------------+                                      |   -> bluez      |
-                                                        +-----------------+
+  gamepad / keyboard / mouse
+        │  Bluetooth
+   ┌────┴─────┐        HCI over your LAN         ┌──────────────────┐
+   │ ESP32    │  ───────────────────────────▶   │ your Linux PC     │
+   │ (radio)  │        (Ethernet / PoE)          │ hcibridge → BlueZ │
+   └──────────┘                                  └──────────────────┘
 ```
 
-## Layout
+## What you need
 
-| Path | What |
-|---|---|
-| `common/h4.zig` | H4 packet reassembly, shared by firmware and host, allocation free |
-| `firmware/main/bridge.zig` | ESP32 logic: TCP server, byte pumps, flow control, stats |
-| `firmware/main/glue.c` | ESP-IDF glue: Ethernet, BT controller, sockets, FreeRTOS objects |
-| `host/main.zig` | `hcibridge` CLI: run (daemon), list, status, update |
-| `host/session.zig` | one bridge session, both directions |
-| `host/sim.zig` | `hcibridge-sim`, fake controller for testing without hardware |
-| `host/openrc/` | OpenRC service files |
-| `scripts/firmware.sh` | builds and flashes the firmware inside the ESP-IDF container |
+- An **Olimex ESP32-POE** board (original ESP32, powered over Ethernet).
+- A **Linux PC** with BlueZ and the `hci_vhci` kernel module (standard).
+- Both on the **same network**.
 
-Everything with logic is Zig. C is limited to SDK calls that hide behind
-macros or big config structs.
+## Get started
 
-## One binary, several jobs
+### 1. Flash the board
 
-`hcibridge` is the whole PC side. Statically linked, no libc, cross-compiled
-for x86_64, aarch64 and armv7 (download from the latest release).
+Open the **[web flasher](https://heppu.github.io/esp-hci-bridge/)** in Chrome,
+Chromium, or Edge, plug the board into that computer over USB, and click Install.
+That is the whole firmware step.
 
-```
-hcibridge run                       daemon (default): attach bridges to bluez
-hcibridge list                      discover bridges, show firmware versions
-hcibridge status <ip>               one bridge's full status
-hcibridge update <ip|all> <file>    push an OTA firmware image
-```
+(Prefer the terminal? Every [release](https://github.com/heppu/esp-hci-bridge/releases/latest)
+also has the raw `.bin` files and an `esptool` command.)
 
-`hcibridge list` example:
+### 2. Install on your PC
 
-```
-NAME               ADDRESS               BDADDR            VERSION      SLOT
-esp-hci-bridge     172.16.135.242:4444   a0:a3:b3:2f:61:1e v0.3.0       ota_0
-```
-
-`hcibridge update all firmware.bin` updates every board it can discover.
-
-### Completions and man page
-
-Both are generated from the CLI spec in `host/spec.zig`, so they never drift.
-The installer drops them in place; to do it by hand:
-
-```
-hcibridge completions bash | sudo tee /usr/share/bash-completion/completions/hcibridge
-hcibridge completions zsh  | sudo tee /usr/share/zsh/site-functions/_hcibridge
-hcibridge completions fish | sudo tee /usr/share/fish/vendor_completions.d/hcibridge.fish
-hcibridge man | sudo tee /usr/local/share/man/man1/hcibridge.1
-```
-
-`zig build gen` writes all four into `zig-out/gen/`, and each release ships them.
-
-## Configuration
-
-Every setting has one definition in `host/settings.zig` and can be supplied
-three ways, resolved highest-first:
-
-```
-flag  >  environment variable  >  config file (+ .d)  >  built-in default
-```
-
-Scalars take the top source; lists (`client`, `allow`, `deny`) accumulate
-across all of them. The config file is `/etc/hcibridge/config` plus every
-`*.conf` in `/etc/hcibridge/config.d/` (sorted, drop-in style); `--config`
-points elsewhere and its drop-ins live in `<path>.d/`.
-
-| setting | flag | env | config key |
-|---|---|---|---|
-| auto-discovery on/off | `--discovery on\|off`, `--no-discovery` | `HCIBRIDGE_DISCOVERY` | `discovery` |
-| discovery listen IP | `--bind` | `HCIBRIDGE_BIND` | `bind` |
-| accept only this IP range | `--subnet` | `HCIBRIDGE_SUBNET` | `subnet` |
-| discovery UDP port | `--discovery-port` | `HCIBRIDGE_DISCOVERY_PORT` | `discovery-port` |
-| default board TCP port | `--port` | `HCIBRIDGE_PORT` | `port` |
-| virtual HCI device | `--vhci` | `HCIBRIDGE_VHCI` | `vhci` |
-| reconnect delay (ms) | `--reconnect-ms` | `HCIBRIDGE_RECONNECT_MS` | `reconnect-ms` |
-| static ESP boards | `--client` (repeat) | `HCIBRIDGE_CLIENTS` (comma) | `client` (repeat) |
-| allowlist by BDADDR | `--allow` (repeat) | `HCIBRIDGE_ALLOW` | `allow` |
-| denylist by BDADDR | `--deny` (repeat) | `HCIBRIDGE_DENY` | `deny` |
-
-`--host <addr>` is sugar for one `client` plus `discovery = off`. Examples:
-
-```
-hcibridge run --subnet 172.16.0.0/16          # only boards on that network
-hcibridge run --no-discovery --client 172.16.135.242
-HCIBRIDGE_DISCOVERY_PORT=4600 hcibridge run   # via environment
-```
-
-Drop a per-board tweak in its own file, e.g.
-`/etc/hcibridge/config.d/10-livingroom.conf` with a single `allow =` line.
-This native config is separate from the shell env file `/etc/hcibridge.conf`
-that the runit and s6 wrappers source for `BRIDGE_ARGS`.
-
-## Discovery and multiple boards
-
-By default `hcibridge run` operates in discovery mode: it finds every ESP bridge on
-the LAN by UDP broadcast (port 4445) and gives each its own `/dev/vhci`
-adapter, so bluez sees one controller per board and keeps bonds per board.
-Plug in another board and it appears on its own; power one off and its adapter
-drops. Pass `--host <ip>` to pin a single board and skip discovery.
-
-Each board announces `ESPHCI1<TAB>ANNOUNCE<TAB><bdaddr><TAB><port><TAB><name>`
-every 2s and also answers a probe. The protocol lives in `common/discovery.zig`.
-
-## Host side
-
-Needs a kernel with `hci_vhci` and bluez. Build needs Zig 0.16, or grab a
-static binary from the latest release (no toolchain, no libc).
-
-### Install from a package (recommended)
-
-Each release ships packages built from one nfpm config, plus source recipes.
-
-**Debian / Ubuntu** (`.deb`), **Fedora / RHEL** (`.rpm`), **Alpine** (`.apk`) -
-download the file for your architecture from the
+Grab the package for your distro and architecture from the
 [latest release](https://github.com/heppu/esp-hci-bridge/releases/latest):
 
-```
-sudo dpkg -i hcibridge_*_amd64.deb            # Debian/Ubuntu
-sudo rpm -i hcibridge-*.x86_64.rpm            # Fedora/RHEL
+```sh
+sudo dpkg -i hcibridge_*_amd64.deb                      # Debian / Ubuntu
+sudo rpm -i hcibridge-*.x86_64.rpm                      # Fedora / RHEL
 sudo apk add --allow-untrusted hcibridge_*_x86_64.apk   # Alpine
 ```
 
-These install the binary, completions, man page, config in `/etc/hcibridge/`,
-the service (systemd on deb/rpm, OpenRC on apk), and enable it in discovery mode.
+Arch users have a `PKGBUILD`, Void a `void-template`, all on the release page.
+The package installs a background service that starts on boot and automatically
+finds any board on your network. Nothing else to configure.
 
-**Arch (AUR)**: the release ships a `PKGBUILD` (source build). `makepkg -si`.
-**Alpine (source)**: an `APKBUILD` for `abuild`.
-**Void Linux**: a `void-template`; drop it in `void-packages/srcpkgs/hcibridge/template` and `./xbps-src pkg hcibridge`.
+### 3. Pair your devices
 
-Build the packages yourself with `packaging/build.sh` (needs `zig` and `nfpm`).
+Check the board showed up, then pair as usual:
 
-### Install with the script
-
-Install as a boot service:
-
-```
-doas scripts/install-host-service.sh
+```sh
+hcibridge list                 # your boards and their firmware version
+bluetoothctl                   # scan / pair / connect, as with any adapter
 ```
 
-The installer builds the binary to `/usr/local/bin/hcibridge`, loads `hci_vhci`
-at boot, detects your init system (systemd, OpenRC, runit or s6) and installs
-the matching unit in discovery mode. Ready-made files live under `host/` if you
-prefer to install by hand:
+Each board appears as its own controller, so its pairings stay with it.
 
-**systemd**
+## Managing boards
 
-```
-install -m755 zig-out/bin/hcibridge /usr/local/bin/hcibridge
-install -m644 host/systemd/hcibridge.service /etc/systemd/system/
-install -m644 host/systemd/hcibridge.env /etc/default/hcibridge
-echo hci_vhci > /etc/modules-load.d/hci_vhci.conf
-systemctl daemon-reload && systemctl enable --now hcibridge
-```
+`hcibridge` is a single command. The service runs `hcibridge run`; you use the
+rest by hand:
 
-**OpenRC**
-
-```
-install -m755 host/openrc/hcibridged /etc/init.d/hcibridged
-install -m644 host/openrc/hcibridged.confd /etc/conf.d/hcibridged
-rc-update add hcibridged default && rc-service hcibridged start
-```
-
-**runit**
-
-```
-install -m644 host/hcibridge.conf /etc/hcibridge.conf
-cp -r host/runit/hcibridge /etc/sv/hcibridge
-ln -s /etc/sv/hcibridge /var/service/     # or your runsvdir scan dir
-```
-
-**s6**
-
-```
-install -m644 host/hcibridge.conf /etc/hcibridge.conf
-cp -r host/s6/hcibridge /etc/s6/sv/hcibridge   # add to your s6-rc db, then reload
-```
-
-All of these order the daemon before the Bluetooth service so bluez sees the
-adapters on boot, restart it on crash, and default to discovery mode. Set
-`BRIDGE_ARGS="--host <ip>"` (systemd: `/etc/default/hcibridge`, OpenRC:
-`/etc/conf.d/hcibridged`, runit/s6: `/etc/hcibridge.conf`) to pin one board.
-
-Manual run:
-
-```
-sudo modprobe hci_vhci
-sudo hcibridge run                    # discovery mode, finds all bridges
-sudo hcibridge run --host 172.16.x.y  # or pin one board
-bluetoothctl list                     # one controller per board
-```
-
-The daemon reconnects forever. While the link is down it closes `/dev/vhci`
-so bluez sees the controller go away instead of hanging on a dead one.
-Pairings survive, they are keyed on the controller address.
-
-### Without hardware
-
-```
-zig build test
-zig build sim                  # fake controller on port 4444
-zig build run -- --host 127.0.0.1 --once
-```
-
-The sim answers the commands bluez sends during adapter bring up and loops
-ACL data back. The integration test wires daemon and sim together with a
-seqpacket socket standing in for `/dev/vhci`.
-
-## Firmware
-
-Target board: Olimex ESP32-POE (original ESP32, LAN8710 PHY). Pins in
-`firmware/main/Kconfig.projbuild`, defaults match the board:
-
-| Signal | GPIO |
+| command | what it does |
 |---|---|
-| MDC | 23 |
-| MDIO | 18 |
-| PHY power (used as reset) | 12 |
-| RMII 50 MHz clock out | 17 |
-| PHY address | 0 |
+| `hcibridge list` | discover boards and show firmware versions |
+| `hcibridge status <ip>` | full status of one board |
+| `hcibridge update <ip\|all> <file.bin>` | update firmware over the network |
+| `hcibridge run` | the daemon (started by the service) |
 
-Build needs docker. The script pulls `espressif/idf:v5.5.5` and the
-Espressif Zig fork (upstream Zig has no Xtensa backend).
+There is a man page (`man hcibridge`) and shell completions for bash, zsh, and
+fish, all installed by the package.
+
+### Updating firmware
+
+No cable needed after the first flash. Download the new `esp-hci-bridge.bin`
+from a release and:
+
+```sh
+hcibridge update all esp-hci-bridge.bin
+```
+
+Boards keep two firmware slots and roll back automatically if an update fails to
+come online.
+
+## Configuration
+
+Everything works out of the box in discovery mode. To tune it, edit
+`/etc/hcibridge/config` (drop-in fragments in `/etc/hcibridge/config.d/*.conf`
+also apply). Every setting can equally be an environment variable or a
+command-line flag; they win in that order:
 
 ```
+flag  >  environment variable  >  config file  >  built-in default
+```
+
+| setting | config key | flag | environment |
+|---|---|---|---|
+| auto-discovery on/off | `discovery` | `--discovery` / `--no-discovery` | `HCIBRIDGE_DISCOVERY` |
+| accept only this IP range | `subnet` | `--subnet` | `HCIBRIDGE_SUBNET` |
+| pin specific boards | `client` | `--client` / `--host` | `HCIBRIDGE_CLIENTS` |
+| allow only these devices | `allow` | `--allow` | `HCIBRIDGE_ALLOW` |
+| block devices | `deny` | `--deny` | `HCIBRIDGE_DENY` |
+
+`allow`/`deny` take a board's Bluetooth address (the BDADDR from
+`hcibridge list`). The installed `/etc/hcibridge/config` documents every option.
+
+## More than one board
+
+Discovery handles as many boards as you like at once: plug another in and it
+shows up on its own, unplug one and its adapter disappears. Put one bridge in
+each room, or set `subnet` so the daemon only adopts boards on your own network.
+
+---
+
+## How it works
+
+The ESP32 runs only the Bluetooth *controller* (the radio and link layer) and
+forwards raw HCI packets over TCP. The PC daemon feeds those into the kernel's
+virtual HCI device (`/dev/vhci`), so BlueZ sees an ordinary local controller.
+Boards announce themselves over UDP; the daemon attaches each to its own
+adapter. The network hop adds well under a millisecond, so latency is dominated
+by the Bluetooth link itself, exactly as with a built-in adapter.
+
+## Build from source
+
+Needs [Zig](https://ziglang.org) 0.16. The PC side is one static binary with no
+libc, cross-compiled for x86_64, aarch64, and armv7.
+
+```sh
+zig build -Doptimize=ReleaseSafe   # -> zig-out/bin/hcibridge
+zig build test                     # run the test suite
+zig build release                  # static binaries for all target arches
+zig build gen                      # man page + shell completions
+```
+
+Build the distro packages locally with `packaging/build.sh` (needs `zig` and
+[`nfpm`](https://nfpm.goreleaser.com/)). The `deb`, `rpm`, and `apk` come from
+one nfpm config; `PKGBUILD`, `APKBUILD`, and the Void template build from source.
+
+To install without a package, `sudo scripts/install-host-service.sh` builds the
+binary and sets up the service for whatever init system it detects (systemd,
+OpenRC, runit, or s6).
+
+## Build the firmware
+
+Needs Docker (it pulls the ESP-IDF toolchain and a Zig with Xtensa support).
+
+```sh
 scripts/firmware.sh build
 PORT=/dev/ttyUSB0 scripts/firmware.sh flash
 PORT=/dev/ttyUSB0 scripts/firmware.sh monitor
 ```
 
-### Update over Ethernet
+The bridge logic is Zig (`firmware/main/bridge.zig`); C is limited to ESP-IDF
+setup in `firmware/main/glue.c`. Pin assignments for the Olimex ESP32-POE are in
+`firmware/main/Kconfig.projbuild`.
 
-After the first USB flash every update can go over the network:
+> On the non-ISO ESP32-POE, unplug PoE before connecting USB. Olimex warns the
+> missing isolation can otherwise damage the PC.
 
-```
-scripts/ota.sh 172.16.135.242                       # uses firmware/build
-scripts/ota.sh 172.16.135.242 path/to/esp-hci-bridge.bin
-curl http://172.16.135.242/                          # version, address, stats
-```
+## Repository layout
 
-Two OTA slots with bootloader rollback. A new image is confirmed once it
-gets an IP address, otherwise the next reset boots the previous one.
-
-### Flash from the browser
-
-Every tag `v*` builds a release and publishes a flashing page on GitHub
-Pages. Open it in Chromium, Chrome or Edge, click Install, pick the CH340
-port. The page ships the exact binaries of that release, so it always flashes
-the latest one. Local preview:
-
-```
-scripts/make-site.sh dev firmware/build _site
-python3 -m http.server -d _site 8000     # http://localhost:8000
-```
-
-Cut a release:
-
-```
-git tag v0.1.0 && git push origin v0.1.0
-```
-
-After the partition table or other `sdkconfig.defaults` changes, the
-generated `firmware/sdkconfig` must go. The docker script handles that,
-otherwise `rm firmware/sdkconfig` before building.
-
-Build without docker: have ESP-IDF 5.5 exported and `ZIG` pointing at the
-Espressif Zig, then `cd firmware && idf.py build`.
-
-The Zig part is compiled by the root `build.zig` behind `-Dfirmware=true`
-and linked into the `main` component as an object. Per function sections are
-on so the Xtensa linker can keep literal pools in range.
-
-Config: `idf.py menuconfig`, menu "HCI bridge". TCP port, DHCP hostname
-(`esp-hci-bridge` by default), PHY pins.
-
-Do not connect the micro USB to a PC while the non ISO ESP32-POE is on PoE.
-Olimex warns this can damage the PC. Flash with PoE unplugged, or use the
-ISO board.
+| path | what |
+|---|---|
+| `common/h4.zig` | HCI H4 packet framing, shared by firmware and host |
+| `common/discovery.zig` | the UDP discovery protocol |
+| `firmware/` | ESP32 firmware (Zig logic + ESP-IDF glue) |
+| `host/` | the `hcibridge` binary: daemon, CLI, config, settings schema |
+| `host/spec.zig`, `host/settings.zig` | single sources for the CLI and its settings |
+| `packaging/` | nfpm config and distro recipes |
+| `web/` | the browser flasher page |
 
 ## Protocol
 
-Plain TCP, one client at a time, a new connection replaces the old one. Both
-directions carry H4: one indicator byte (1 command, 2 ACL, 3 SCO, 4 event, 5
-ISO), the HCI header, payload. The firmware reassembles packets before handing
-them to the controller because the VHCI API wants whole packets. The daemon
-reassembles before writing to `/dev/vhci` for the same reason. Controller to
-host bytes are forwarded as they come, TCP is a stream anyway.
-
-Flow control: the controller says when it can take a packet, the firmware
-waits up to 5 s then drops. Controller to host packets are queued in a 16 KB
-FreeRTOS stream buffer, whole packets only, dropped with a counter when full
-or when no host is connected.
-
-Keepalive on both ends: 5 s idle, 2 s interval, 3 probes. A dead peer is gone
-in about 11 s, then the firmware accepts a fresh connection and the daemon
-reconnects once a second.
-
-## Bring up checklist
-
-1. Flash, open monitor. Expect `ethernet link up`, `ip ...`, `bt controller
-   up, address ...`, `listening on tcp port 4444`.
-2. `nc <ip> 4444` from the PC, then type nothing and close. Monitor shows
-   `host connected` and `host disconnected`.
-3. Start `hcibridge run --host <ip>` (or just `hcibridge run`). Monitor shows `host connected`. On the PC
-   `bluetoothctl list` shows a new controller with the ESP32 address.
-4. `bluetoothctl`: `select <addr>`, `power on`, `scan on`. Pair the pad.
-5. Watch `stats:` lines in the monitor once a minute for drop counters.
+Plain TCP carries HCI in H4 framing (one indicator byte, the HCI header, then
+the payload). One client per board; a new connection replaces the old one.
+Boards send `ESPHCI1 ANNOUNCE <bdaddr> <port> <name>` over UDP broadcast and
+answer probes. TCP keepalive drops a dead peer in about ten seconds.
 
 ## Status
 
-Written blind before the board arrived. Host side is tested end to end
-against the simulator. Firmware compiles and links against ESP-IDF 5.5.5 but
-has not run on hardware yet. Things to look at first if it misbehaves:
-
-- BT controller enable failing: check `CONFIG_BTDM_CTRL_MODE_BTDM` in
-  `sdkconfig`, memory is tight on original ESP32 with dual mode.
-- No Ethernet link: PHY power on GPIO12, it is a strapping pin on ESP32.
-- Task stack overflow in `hci_rx` or `hci_tx`: bump sizes in
-  `bridge_start`.
+The bridge is complete and runs on real hardware: pairing, input, discovery,
+per-board adapters, OTA updates, and rollback all work over 100 m of Ethernet.
+Xbox Series controllers need current firmware to pair cleanly (update via a
+Windows PC or an Xbox), a known BlueZ quirk rather than a bridge limitation.
