@@ -253,6 +253,42 @@ pub fn update(io: Io, gpa: std.mem.Allocator, target: []const u8, path: []const 
     return if (updateOne(io, gpa, &addr, image, &keys)) 0 else 1;
 }
 
+fn dropinPath(cfg_path: []const u8, bdaddr: []const u8, buf: *[512]u8) ![]const u8 {
+    var fname: [17]u8 = undefined;
+    for (bdaddr[0..17], 0..) |c, i| fname[i] = if (c == ':') '-' else std.ascii.toLower(c);
+    return std.fmt.bufPrint(buf, "{s}.d/board-{s}.conf", .{ cfg_path, &fname });
+}
+
+/// Removes a board's key from the config. The running daemon notices on the
+/// board's next announce and drops its link. The board itself keeps thinking
+/// it is claimed, which only matters if it should pair with another PC.
+pub fn revoke(io: Io, gpa: std.mem.Allocator, bdaddr: []const u8, cfg_path: []const u8) !u8 {
+    if (bdaddr.len != 17) {
+        log.err("expected a Bluetooth address like a0:a3:b3:2f:61:1e, got {s}", .{bdaddr});
+        return 2;
+    }
+    var path_buf: [512]u8 = undefined;
+    const dropin = try dropinPath(cfg_path, bdaddr, &path_buf);
+    Io.Dir.cwd().deleteFile(io, dropin) catch |err| switch (err) {
+        error.FileNotFound => {
+            var keys = try loadKeys(io, gpa, cfg_path);
+            defer keys.deinit();
+            if (settings.lookupPsk(keys.psk, bdaddr) != null) {
+                log.err("{s} has no drop-in at {s} but a key is set elsewhere: remove the `psk = {s}=...` line from {s} or its .d files by hand", .{ bdaddr, dropin, bdaddr, cfg_path });
+                return 1;
+            }
+            log.info("{s} is not claimed on this PC, nothing to do", .{bdaddr});
+            return 0;
+        },
+        else => {
+            log.err("cannot remove {s}: {s}", .{ dropin, @errorName(err) });
+            return 1;
+        },
+    };
+    log.info("revoked {s}: removed {s}; the daemon drops the board on its next announce", .{ bdaddr, dropin });
+    return 0;
+}
+
 pub fn reboot(io: Io, gpa: std.mem.Allocator, ip: []const u8, cfg_path: []const u8) !u8 {
     const addr: Io.net.IpAddress = .{ .ip4 = Io.net.Ip4Address.parse(ip, httpc.http_port) catch {
         log.err("bad ip: {s}", .{ip});
@@ -321,10 +357,8 @@ pub fn claim(io: Io, gpa: std.mem.Allocator, ip: []const u8, cfg_path: []const u
     // Save as a drop-in: <config>.d/board-<bdaddr>.conf
     var line_buf: [128]u8 = undefined;
     const line = try std.fmt.bufPrint(&line_buf, "psk = {s}={s}\n", .{ info.bdaddr, &psk_hex });
-    var fname: [24]u8 = undefined;
-    for (info.bdaddr, 0..) |c, i| fname[i] = if (c == ':') '-' else c;
     var path_buf: [512]u8 = undefined;
-    const dropin = try std.fmt.bufPrint(&path_buf, "{s}.d/board-{s}.conf", .{ cfg_path, fname[0..17] });
+    const dropin = try dropinPath(cfg_path, info.bdaddr, &path_buf);
 
     if (writeFile(io, dropin, line)) {
         log.info("claimed {s} ({s}); key saved to {s}", .{ ip, info.bdaddr, dropin });
