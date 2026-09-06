@@ -10,6 +10,9 @@ int bridge_on_controller_packet(uint8_t *data, uint16_t len);
 void bridge_on_controller_send_available(void);
 size_t bridge_stats_json(char *buf, size_t len);
 
+// Implemented in net.c
+bool net_start(void);
+
 // Implemented in ota.c
 void ota_init(void);
 void ota_confirm(void);

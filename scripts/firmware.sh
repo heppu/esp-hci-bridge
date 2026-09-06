@@ -1,6 +1,7 @@
 #!/bin/sh
 # Runs idf.py inside the ESP-IDF container with the Espressif Zig toolchain.
-# Usage: scripts/firmware.sh build | flash | monitor | menuconfig | ...
+# Usage: [BOARD=<preset>] scripts/firmware.sh build | flash | monitor | menuconfig | ...
+# Presets: firmware/boards/*.conf (default olimex-esp32-poe)
 # Set PORT=/dev/ttyUSB0 for flash and monitor.
 set -eu
 
@@ -15,12 +16,23 @@ if [ ! -x "$ZIG_DIR/zig" ]; then
     curl -sSL "$ZIG_URL" | tar -xJ -C "$ZIG_DIR" --strip-components=1
 fi
 
-# IDF only reads sdkconfig.defaults when creating sdkconfig, so a stale one
-# silently keeps old settings such as the partition table.
-if [ -f "$ROOT/firmware/sdkconfig" ] && [ "$ROOT/firmware/sdkconfig.defaults" -nt "$ROOT/firmware/sdkconfig" ]; then
-    echo "sdkconfig.defaults changed, regenerating sdkconfig"
-    rm -f "$ROOT/firmware/sdkconfig"
+# Board preset: firmware/boards/<BOARD>.conf layered on sdkconfig.defaults.
+# Each board gets its own build dir and sdkconfig so presets never bleed.
+BOARD=${BOARD:-olimex-esp32-poe}
+[ -f "$ROOT/firmware/boards/$BOARD.conf" ] || { echo "unknown BOARD=$BOARD; see firmware/boards/" >&2; exit 1; }
+BUILD_DIR="build-$BOARD"
+# IDF only reads defaults when creating sdkconfig; drop a stale one so preset
+# or defaults changes take effect.
+if [ -f "$ROOT/firmware/$BUILD_DIR/sdkconfig" ]; then
+    for f in "$ROOT/firmware/sdkconfig.defaults" "$ROOT/firmware/boards/$BOARD.conf"; do
+        if [ "$f" -nt "$ROOT/firmware/$BUILD_DIR/sdkconfig" ]; then
+            echo "config changed, regenerating sdkconfig for $BOARD"
+            rm -f "$ROOT/firmware/$BUILD_DIR/sdkconfig"
+            break
+        fi
+    done
 fi
+IDF_ARGS="-B $BUILD_DIR -DSDKCONFIG=$BUILD_DIR/sdkconfig -DSDKCONFIG_DEFAULTS=sdkconfig.defaults;boards/$BOARD.conf"
 
 DEVICE_ARGS=""
 if [ -n "${PORT:-}" ]; then
@@ -40,4 +52,4 @@ exec docker run --rm $TTY_ARGS $DEVICE_ARGS \
     -e ZIG=/project/.tools/zig-xtensa/zig \
     -v "$ROOT":/project \
     -w /project/firmware \
-    "$IDF_IMAGE" idf.py ${PORT:+-p "$PORT"} "$@"
+    "$IDF_IMAGE" idf.py $IDF_ARGS ${PORT:+-p "$PORT"} "$@"

@@ -8,20 +8,63 @@ menu "HCI bridge"
         string "DHCP hostname"
         default "esp-hci-bridge"
 
-    config BRIDGE_ETH_MDC_GPIO
-        int "Ethernet PHY MDC GPIO"
-        default 23
+    config BRIDGE_NET_WIFI
+        bool "Use WiFi instead of Ethernet"
+        default n
+        help
+            Connect over WiFi. Credentials come from NVS (set once via the
+            SoftAP setup portal) or the baked-in defaults below. Ethernet is
+            the better choice for input latency when the board has it.
 
-    config BRIDGE_ETH_MDIO_GPIO
-        int "Ethernet PHY MDIO GPIO"
-        default 18
+    menu "Ethernet"
+        depends on !BRIDGE_NET_WIFI
 
-    config BRIDGE_ETH_PHY_POWER_GPIO
-        int "Ethernet PHY power/reset GPIO (-1 to disable)"
-        default 12
+        choice BRIDGE_ETH_PHY
+            prompt "PHY chip"
+            default BRIDGE_ETH_PHY_LAN87XX
+            config BRIDGE_ETH_PHY_LAN87XX
+                bool "LAN8710 / LAN8720 (Olimex ESP32-POE, WT32-ETH01)"
+            config BRIDGE_ETH_PHY_RTL8201
+                bool "RTL8201"
+            config BRIDGE_ETH_PHY_IP101
+                bool "IP101"
+            config BRIDGE_ETH_PHY_KSZ80XX
+                bool "KSZ8041 / KSZ8081"
+            config BRIDGE_ETH_PHY_DP83848
+                bool "DP83848"
+        endchoice
 
-    config BRIDGE_ETH_PHY_ADDR
-        int "Ethernet PHY address"
-        default 0
+        config BRIDGE_ETH_MDC_GPIO
+            int "MDC GPIO"
+            default 23
+        config BRIDGE_ETH_MDIO_GPIO
+            int "MDIO GPIO"
+            default 18
+        config BRIDGE_ETH_PHY_POWER_GPIO
+            int "PHY power / reset GPIO (-1 if none)"
+            default 12
+        config BRIDGE_ETH_PHY_ADDR
+            int "PHY address"
+            default 0
+        config BRIDGE_ETH_CLK_IN
+            bool "RMII 50 MHz clock is an external input"
+            default n
+            help
+                Off: the ESP32 generates the RMII clock on the GPIO below
+                (0, 16 or 17). On: an external oscillator feeds GPIO0.
+        config BRIDGE_ETH_CLK_GPIO
+            int "RMII clock GPIO"
+            default 17
+    endmenu
+
+    menu "WiFi"
+        depends on BRIDGE_NET_WIFI
+        config BRIDGE_WIFI_SSID
+            string "SSID (leave empty to use the setup portal)"
+            default ""
+        config BRIDGE_WIFI_PASS
+            string "Password"
+            default ""
+    endmenu
 
 endmenu

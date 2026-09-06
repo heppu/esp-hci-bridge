@@ -14,6 +14,9 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: espressif/idf:v5.5.5
+    strategy:
+      matrix:
+        board: [olimex-esp32-poe, wt32-eth01, generic-wifi]
     steps:
       - uses: actions/checkout@v4
       - name: Fetch Espressif Zig
@@ -21,15 +24,46 @@ jobs:
           mkdir -p .tools/zig-xtensa
           curl -sSL https://github.com/kassane/zig-espressif-bootstrap/releases/download/0.16.0-xtensa/zig-relsafe-x86_64-linux-musl-baseline.tar.xz \
             | tar -xJ -C .tools/zig-xtensa --strip-components=1
-      - name: Build
+      - name: Build ${{ matrix.board }}
         shell: bash
         run: |
           . /opt/esp/idf/export.sh
           export ZIG="$PWD/.tools/zig-xtensa/zig"
           export PROJECT_VER="${GITHUB_REF_NAME}"
-          cd firmware && idf.py build
-      - name: Assemble site
-        run: scripts/make-site.sh "${GITHUB_REF_NAME}" firmware/build _site
+          cd firmware
+          B="build-${{ matrix.board }}"
+          idf.py -B "$B" -DSDKCONFIG="$B/sdkconfig" \
+            -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/${{ matrix.board }}.conf" build
+      - name: Stage board files
+        run: |
+          B="firmware/build-${{ matrix.board }}"
+          mkdir -p "fw/${{ matrix.board }}"
+          cp "$B/flash_args" "$B/esp-hci-bridge.bin" "fw/${{ matrix.board }}/"
+          mkdir -p "fw/${{ matrix.board }}/bootloader" "fw/${{ matrix.board }}/partition_table"
+          cp "$B/bootloader/bootloader.bin" "fw/${{ matrix.board }}/bootloader/"
+          cp "$B/partition_table/partition-table.bin" "fw/${{ matrix.board }}/partition_table/"
+          cp "$B/ota_data_initial.bin" "fw/${{ matrix.board }}/" 2>/dev/null || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fw-${{ matrix.board }}
+          path: fw/
+
+  site:
+    needs: firmware
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: fw-*
+          path: fw
+          merge-multiple: true
+      - name: Assemble site for all boards
+        run: |
+          scripts/make-site.sh "${GITHUB_REF_NAME}" _site \
+            olimex-esp32-poe=fw/olimex-esp32-poe \
+            wt32-eth01=fw/wt32-eth01 \
+            generic-wifi=fw/generic-wifi
       - uses: actions/upload-artifact@v4
         with:
           name: site
@@ -83,7 +117,7 @@ jobs:
           path: out/
 
   release:
-    needs: [firmware, cli]
+    needs: [site, cli]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -96,15 +130,25 @@ jobs:
           path: cli
       - name: Package
         run: |
-          cp _site/firmware/*.bin _site/manifest.json .
+          # per-board firmware images, named by board
+          for b in olimex-esp32-poe wt32-eth01 generic-wifi; do
+            cp "_site/firmware/$b/esp-hci-bridge.bin" "esp-hci-bridge-$b.bin"
+            cp "_site/manifest-$b.json" "manifest-$b.json"
+          done
+          # shared bootloader/partition table are identical across boards
+          cp _site/firmware/olimex-esp32-poe/bootloader.bin _site/firmware/olimex-esp32-poe/partition-table.bin .
           chmod +x cli/hcibridge-*
       - uses: softprops/action-gh-release@v2
         with:
           files: |
             bootloader.bin
             partition-table.bin
-            esp-hci-bridge.bin
-            manifest.json
+            esp-hci-bridge-olimex-esp32-poe.bin
+            esp-hci-bridge-wt32-eth01.bin
+            esp-hci-bridge-generic-wifi.bin
+            manifest-olimex-esp32-poe.json
+            manifest-wt32-eth01.json
+            manifest-generic-wifi.json
             cli/hcibridge-x86_64-linux
             cli/hcibridge-aarch64-linux
             cli/hcibridge-armv7-linux

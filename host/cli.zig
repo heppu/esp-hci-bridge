@@ -121,7 +121,7 @@ pub fn status(io: Io, gpa: std.mem.Allocator, ip: []const u8) !u8 {
 }
 
 fn readFile(io: Io, gpa: std.mem.Allocator, path: []const u8) ![]u8 {
-    const f = try Io.Dir.openFileAbsolute(io, path, .{ .mode = .read_only });
+    const f = try Io.Dir.cwd().openFile(io, path, .{ .mode = .read_only });
     defer f.close(io);
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(gpa);

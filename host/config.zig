@@ -42,7 +42,7 @@ pub const Raw = struct {
 };
 
 fn readFile(io: Io, gpa: std.mem.Allocator, path: []const u8) !?[]u8 {
-    const f = Io.Dir.openFileAbsolute(io, path, .{ .mode = .read_only }) catch |err| switch (err) {
+    const f = Io.Dir.cwd().openFile(io, path, .{ .mode = .read_only }) catch |err| switch (err) {
         error.FileNotFound => return null,
         else => return err,
     };

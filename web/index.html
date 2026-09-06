@@ -24,8 +24,10 @@
 <p class="sub">Olimex ESP32-POE as a remote Bluetooth controller over Ethernet.</p>
 
 <div class="card">
+  <p><label>Board: <select id="board"></select></label></p>
+  <p id="boarddesc" style="color:#888;margin-top:0"></p>
   <p>Firmware <strong id="version">…</strong>, built <span id="date">…</span>.</p>
-  <esp-web-install-button manifest="manifest.json">
+  <esp-web-install-button id="install" manifest="manifest.json">
     <span slot="unsupported">Needs Chromium, Chrome or Edge. Firefox has no Web Serial.</span>
     <span slot="not-allowed">Open this page over HTTPS or localhost.</span>
   </esp-web-install-button>
@@ -48,17 +50,36 @@ bluetoothctl list</pre>
 </div>
 
 <script>
-  fetch('manifest.json').then(r => r.json()).then(m => {
-    document.getElementById('version').textContent = m.version;
-    document.getElementById('date').textContent = m.built || '';
-    const table = document.getElementById('parts');
-    for (const p of m.builds[0].parts) {
-      const row = table.insertRow();
-      const name = p.path.split('/').pop();
-      row.insertCell().innerHTML = `<a href="${p.path}">${name}</a>`;
-      row.insertCell().textContent = '0x' + p.offset.toString(16);
+  const sel = document.getElementById('board');
+  const btn = document.getElementById('install');
+  function loadManifest(id) {
+    btn.setAttribute('manifest', 'manifest-' + id + '.json');
+    fetch('manifest-' + id + '.json').then(r => r.json()).then(m => {
+      document.getElementById('version').textContent = m.version;
+      document.getElementById('date').textContent = m.built || '';
+      const table = document.getElementById('parts');
+      table.innerHTML = '';
+      for (const p of m.builds[0].parts) {
+        const row = table.insertRow();
+        const name = p.path.split('/').pop();
+        row.insertCell().innerHTML = `<a href="${p.path}">${name}</a>`;
+        row.insertCell().textContent = '0x' + p.offset.toString(16);
+      }
+    }).catch(() => {});
+  }
+  fetch('boards.json').then(r => r.json()).then(boards => {
+    for (const b of boards) {
+      const o = document.createElement('option');
+      o.value = b.id; o.textContent = b.id; o.dataset.desc = b.desc;
+      sel.appendChild(o);
     }
-  }).catch(() => {});
+    const pick = () => {
+      document.getElementById('boarddesc').textContent = sel.selectedOptions[0].dataset.desc || '';
+      loadManifest(sel.value);
+    };
+    sel.addEventListener('change', pick);
+    pick();
+  }).catch(() => loadManifest('olimex-esp32-poe'));
 </script>
 </body>
 </html>

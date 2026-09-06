@@ -247,60 +247,6 @@ static void bt_init(void)
 }
 
 // ---------------------------------------------------------------------------
-// Ethernet
-// ---------------------------------------------------------------------------
-
-static void eth_event(void *arg, esp_event_base_t base, int32_t id, void *data)
-{
-    switch (id) {
-    case ETHERNET_EVENT_CONNECTED: ESP_LOGI(TAG, "ethernet link up"); break;
-    case ETHERNET_EVENT_DISCONNECTED: ESP_LOGW(TAG, "ethernet link down"); break;
-    case ETHERNET_EVENT_START: ESP_LOGI(TAG, "ethernet started"); break;
-    case ETHERNET_EVENT_STOP: ESP_LOGW(TAG, "ethernet stopped"); break;
-    default: break;
-    }
-}
-
-static void ip_event(void *arg, esp_event_base_t base, int32_t id, void *data)
-{
-    const ip_event_got_ip_t *ev = data;
-    ESP_LOGI(TAG, "ip " IPSTR " mask " IPSTR " gw " IPSTR,
-             IP2STR(&ev->ip_info.ip), IP2STR(&ev->ip_info.netmask), IP2STR(&ev->ip_info.gw));
-    ota_confirm();
-}
-
-static void eth_init(void)
-{
-    eth_mac_config_t mac_config = ETH_MAC_DEFAULT_CONFIG();
-    eth_esp32_emac_config_t emac_config = ETH_ESP32_EMAC_DEFAULT_CONFIG();
-    emac_config.smi_gpio.mdc_num = CONFIG_BRIDGE_ETH_MDC_GPIO;
-    emac_config.smi_gpio.mdio_num = CONFIG_BRIDGE_ETH_MDIO_GPIO;
-    emac_config.interface = EMAC_DATA_INTERFACE_RMII;
-    emac_config.clock_config.rmii.clock_mode = EMAC_CLK_OUT;
-    emac_config.clock_config.rmii.clock_gpio = EMAC_CLK_OUT_180_GPIO;
-    esp_eth_mac_t *mac = esp_eth_mac_new_esp32(&emac_config, &mac_config);
-
-    eth_phy_config_t phy_config = ETH_PHY_DEFAULT_CONFIG();
-    phy_config.phy_addr = CONFIG_BRIDGE_ETH_PHY_ADDR;
-    // On ESP32-POE this GPIO is the PHY power enable, the reset sequence doubles as power up.
-    phy_config.reset_gpio_num = CONFIG_BRIDGE_ETH_PHY_POWER_GPIO;
-    esp_eth_phy_t *phy = esp_eth_phy_new_lan87xx(&phy_config);
-
-    esp_eth_config_t eth_config = ETH_DEFAULT_CONFIG(mac, phy);
-    esp_eth_handle_t eth_handle = NULL;
-    ESP_ERROR_CHECK(esp_eth_driver_install(&eth_config, &eth_handle));
-
-    esp_netif_config_t netif_config = ESP_NETIF_DEFAULT_ETH();
-    esp_netif_t *netif = esp_netif_new(&netif_config);
-    ESP_ERROR_CHECK(esp_netif_set_hostname(netif, CONFIG_BRIDGE_HOSTNAME));
-    ESP_ERROR_CHECK(esp_netif_attach(netif, esp_eth_new_netif_glue(eth_handle)));
-
-    ESP_ERROR_CHECK(esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, eth_event, NULL));
-    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, ip_event, NULL));
-    ESP_ERROR_CHECK(esp_eth_start(eth_handle));
-}
-
-// ---------------------------------------------------------------------------
 // LAN discovery: broadcast an announce and answer probes, matching
 // common/discovery.zig ("ESPHCI1\tANNOUNCE\t<bdaddr>\t<port>\t<name>\n").
 // ---------------------------------------------------------------------------
@@ -374,7 +320,10 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
-    eth_init();
+    if (!net_start()) {
+        // Entered WiFi setup portal; do not start the bridge until configured.
+        return;
+    }
     bt_init();
     bridge_start();
     ota_init();

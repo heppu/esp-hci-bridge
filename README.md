@@ -23,7 +23,8 @@ back at the machine.
 
 ## What you need
 
-- An **Olimex ESP32-POE** board (original ESP32, powered over Ethernet).
+- An **ESP32 board** (original ESP32). Ethernet with PoE is the best fit,
+  but any WiFi ESP32 devkit works too. See [Supported boards](#supported-boards).
 - A **Linux PC** with BlueZ and the `hci_vhci` kernel module (standard).
 - Both on the **same network**.
 
@@ -32,8 +33,12 @@ back at the machine.
 ### 1. Flash the board
 
 Open the **[web flasher](https://heppu.github.io/esp-hci-bridge/)** in Chrome,
-Chromium, or Edge, plug the board into that computer over USB, and click Install.
-That is the whole firmware step.
+Chromium, or Edge, pick your board from the dropdown, plug the board into that
+computer over USB, and click Install. That is the whole firmware step.
+
+WiFi boards with no saved network start a setup hotspot on first boot: join
+`esp-hci-bridge-setup` from your phone or laptop, open `http://192.168.4.1/`,
+enter your WiFi name and password. The board reboots onto your network.
 
 (Prefer the terminal? Every [release](https://github.com/heppu/esp-hci-bridge/releases/latest)
 also has the raw `.bin` files and an `esptool` command.)
@@ -113,6 +118,26 @@ flag  >  environment variable  >  config file  >  built-in default
 `allow`/`deny` take a board's Bluetooth address (the BDADDR from
 `hcibridge list`). The installed `/etc/hcibridge/config` documents every option.
 
+## Supported boards
+
+Firmware ships as per-board presets (one image each, all in the web flasher and
+on the release page):
+
+| preset | board | network | status |
+|---|---|---|---|
+| `olimex-esp32-poe` | Olimex ESP32-POE / ESP32-POE-ISO | Ethernet, PoE | hardware-verified |
+| `wt32-eth01` | Wireless-Tag WT32-ETH01 | Ethernet | built, not yet tested on hardware |
+| `generic-wifi` | any ESP32 with WiFi (devkits, NodeMCU-32, etc.) | WiFi | built, not yet tested on hardware |
+
+Ethernet is the better choice for input latency; WiFi works and is fine for
+keyboards and mice, and acceptable for gamepads on a good network.
+
+Other Ethernet boards: the PHY (LAN87xx, RTL8201, IP101, KSZ80xx, DP83848),
+MDC/MDIO/power pins, PHY address, and RMII clock mode are all configurable.
+Copy a preset in `firmware/boards/`, set your board's values, and build with
+`BOARD=<name> scripts/firmware.sh build`. Pull requests with new presets are
+welcome.
+
 ## More than one board
 
 Discovery handles as many boards as you like at once: plug another in and it
@@ -155,10 +180,14 @@ OpenRC, runit, or s6).
 Needs Docker (it pulls the ESP-IDF toolchain and a Zig with Xtensa support).
 
 ```sh
-scripts/firmware.sh build
+scripts/firmware.sh build                              # default: olimex-esp32-poe
+BOARD=generic-wifi scripts/firmware.sh build           # another preset
 PORT=/dev/ttyUSB0 scripts/firmware.sh flash
 PORT=/dev/ttyUSB0 scripts/firmware.sh monitor
 ```
+
+Each preset builds into its own `firmware/build-<board>/`. Presets live in
+`firmware/boards/*.conf`; network bring-up is in `firmware/main/net.c`.
 
 The bridge logic is Zig (`firmware/main/bridge.zig`); C is limited to ESP-IDF
 setup in `firmware/main/glue.c`. Pin assignments for the Olimex ESP32-POE are in
