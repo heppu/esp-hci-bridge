@@ -21,6 +21,7 @@ bool auth_check_http(const char *method, const char *path, const uint8_t body_sh
 bool auth_check_http_pre(const char *method, const char *path, uint32_t content_len, const char *header_hex);
 bool auth_ct_equal(const uint8_t *a, const uint8_t *b, size_t n);
 int auth_claim(const uint8_t peer_pub[32], uint8_t our_pub[32]);
+int auth_unclaim(void);
 
 // Implemented in net.c
 bool net_start(void);

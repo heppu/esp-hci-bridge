@@ -314,6 +314,41 @@ pub fn reboot(io: Io, gpa: std.mem.Allocator, ip: []const u8, cfg_path: []const 
     return 0;
 }
 
+/// Tells a board to forget its key and reboot unclaimed, then removes the key
+/// on this side too. Requires the current key, so only the owning PC can do it.
+pub fn unclaim(io: Io, gpa: std.mem.Allocator, ip: []const u8, cfg_path: []const u8) !u8 {
+    const addr: Io.net.IpAddress = .{ .ip4 = Io.net.Ip4Address.parse(ip, httpc.http_port) catch {
+        log.err("bad ip: {s}", .{ip});
+        return 2;
+    } };
+    var keys = try loadKeys(io, gpa, cfg_path);
+    defer keys.deinit();
+    var bd: [17]u8 = undefined;
+    const info = try boardInfo(io, gpa, &addr, &bd);
+    if (info.claimed == false) {
+        log.info("{s} ({s}) is not claimed by anyone", .{ ip, info.bdaddr });
+        return revoke(io, gpa, info.bdaddr, cfg_path);
+    }
+    const psk = settings.lookupPsk(keys.psk, info.bdaddr) orelse {
+        log.err("no key for {s}: this PC did not claim it, so it cannot release it (erase the board over USB instead)", .{info.bdaddr});
+        return 1;
+    };
+    var hbuf: [160]u8 = undefined;
+    const hdr = authHeaders(&psk, "POST", "/unclaim", info.nonce, "", &hbuf);
+    var r = try httpc.postH(io, gpa, &addr, "/unclaim", "", hdr);
+    defer r.deinit(gpa);
+    if (r.status == 404) {
+        log.err("{s} runs firmware without unclaim support: run `hcibridge update {s} <esp-hci-bridge-<board>.bin>` first", .{ ip, ip });
+        return 1;
+    }
+    if (r.status != 200) {
+        log.err("unclaim rejected: HTTP {d} {s}", .{ r.status, std.mem.trim(u8, r.body, " \r\n") });
+        return 1;
+    }
+    log.info("{s} ({s}) forgot its key and is rebooting unclaimed", .{ ip, info.bdaddr });
+    return revoke(io, gpa, info.bdaddr, cfg_path);
+}
+
 /// Pairs with an unclaimed board: X25519 exchange, PSK = SHA256(shared),
 /// written as a drop-in under <config>.d/. First claim wins; re-keying needs
 /// a factory reset of the board.
