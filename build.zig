@@ -44,7 +44,7 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(sim);
 
     const test_step = b.step("test", "Run unit and integration tests");
-    const test_roots = [_][]const u8{ "common/h4.zig", "common/discovery.zig", "host/main.zig", "host/spec.zig", "host/sim.zig", "host/httpc.zig", "host/integration_test.zig" };
+    const test_roots = [_][]const u8{ "common/h4.zig", "common/discovery.zig", "host/main.zig", "host/spec.zig", "host/config.zig", "host/sim.zig", "host/httpc.zig", "host/integration_test.zig" };
     for (test_roots) |root| {
         const t = b.addTest(.{
             .root_module = b.createModule(.{

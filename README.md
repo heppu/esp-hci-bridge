@@ -69,6 +69,28 @@ hcibridge man | sudo tee /usr/local/share/man/man1/hcibridge.1
 
 `zig build gen` writes all four into `zig-out/gen/`, and each release ships them.
 
+## Configuration
+
+The daemon reads `/etc/hcibridge/config` and then every `*.conf` in
+`/etc/hcibridge/config.d/` (sorted by name), Linux drop-in style. Scalar keys
+are last-wins; `allow`/`deny` accumulate. Command-line flags override the files.
+Point elsewhere with `--config <path>` (its drop-ins live in `<path>.d/`).
+
+```
+# /etc/hcibridge/config
+discovery-port = 4445
+# deny = aa:bb:cc:dd:ee:ff        # never attach this board
+# allow = a0:a3:b3:2f:61:1e       # if any allow lines exist, only these attach
+# host = 172.16.135.242           # pin one board, disable discovery
+```
+
+Drop-ins keep per-board or local tweaks out of the main file, e.g.
+`/etc/hcibridge/config.d/10-livingroom.conf` with a single `allow =` line.
+`allow`/`deny` take a board's Bluetooth address (the BDADDR from `hcibridge list`).
+
+Note this native config is separate from the shell env file
+`/etc/hcibridge.conf` that the runit and s6 wrappers source for `BRIDGE_ARGS`.
+
 ## Discovery and multiple boards
 
 By default `hcibridge run` operates in discovery mode: it finds every ESP bridge on

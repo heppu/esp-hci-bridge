@@ -38,6 +38,7 @@ pub const commands = [_]Cmd{
             .{ .long = "--vhci", .arg = "path", .help = "virtual HCI device (default /dev/vhci)" },
             .{ .long = "--discovery-port", .arg = "n", .help = "UDP discovery port (default 4445)" },
             .{ .long = "--reconnect-ms", .arg = "n", .help = "retry delay in --host mode (default 1000)" },
+            .{ .long = "--config", .arg = "path", .help = "config file (default /etc/hcibridge/config; drop-ins in <path>.d/*.conf)" },
             .{ .long = "--once", .help = "--host mode: exit after the first session" },
         },
     },

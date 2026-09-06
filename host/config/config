@@ -1,0 +1,24 @@
+# /etc/hcibridge/config - main configuration for the hcibridge daemon.
+#
+# Drop-in fragments in /etc/hcibridge/config.d/*.conf are merged on top of this
+# file, sorted by name. Scalar keys are last-wins; allow/deny accumulate.
+# Command-line flags override everything here.
+#
+# Format: key = value   ('#' or ';' begins a comment)
+
+# UDP port used to discover bridges on the LAN.
+# discovery-port = 4445
+
+# Virtual HCI device the adapters attach to.
+# vhci = /dev/vhci
+
+# Pin a single board and disable discovery (name or IP):
+# host = 172.16.135.242
+# port = 4444
+# reconnect-ms = 1000
+
+# Attach only these boards (allowlist). Omit to attach every board found.
+# allow = a0:a3:b3:2f:61:1e
+
+# Never attach these boards (deny wins over allow).
+# deny = aa:bb:cc:dd:ee:ff

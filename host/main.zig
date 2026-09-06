@@ -15,18 +15,24 @@ const manager = @import("manager.zig");
 const cli = @import("cli.zig");
 const disc = @import("discovery");
 const spec = @import("spec.zig");
+const config = @import("config.zig");
 
 const log = std.log;
 
 pub const std_options: std.Options = .{ .log_level = .info };
 
-const RunOpts = struct {
+const default_config = "/etc/hcibridge/config";
+
+// Parsed CLI args; null means "not given on the command line" so config can
+// fill it. Precedence: built-in defaults < config file (+ .d) < CLI args.
+const RunArgs = struct {
     host: ?[]const u8 = null,
-    port: u16 = 4444,
-    vhci_path: []const u8 = "/dev/vhci",
-    discovery_port: u16 = disc.default_port,
-    reconnect_ms: u32 = 1000,
+    port: ?u16 = null,
+    vhci: ?[]const u8 = null,
+    discovery_port: ?u16 = null,
+    reconnect_ms: ?u32 = null,
     once: bool = false,
+    config_path: []const u8 = default_config,
 };
 
 fn printHelp(io: Io, file: Io.File) !void {
@@ -113,7 +119,7 @@ pub fn main(init: std.process.Init) !u8 {
     if (!std.mem.eql(u8, cmd, "run")) {
         // Back-compat: `hcibridge --host x ...` with no subcommand.
         if (std.mem.startsWith(u8, cmd, "-")) {
-            var o = RunOpts{};
+            var o = RunArgs{};
             try parseRun(&o, cmd, &it);
             while (it.next()) |a| try parseRun(&o, a, &it);
             return runMode(io, gpa, o);
@@ -123,22 +129,24 @@ pub fn main(init: std.process.Init) !u8 {
         return 2;
     }
 
-    var o = RunOpts{};
+    var o = RunArgs{};
     while (it.next()) |a| try parseRun(&o, a, &it);
     return runMode(io, gpa, o);
 }
 
-fn parseRun(o: *RunOpts, a: []const u8, it: *std.process.Args.Iterator) !void {
+fn parseRun(o: *RunArgs, a: []const u8, it: *std.process.Args.Iterator) !void {
     if (std.mem.eql(u8, a, "--host")) {
         o.host = it.next() orelse return error.MissingValue;
     } else if (std.mem.eql(u8, a, "--port")) {
         o.port = try std.fmt.parseInt(u16, it.next() orelse return error.MissingValue, 10);
     } else if (std.mem.eql(u8, a, "--vhci")) {
-        o.vhci_path = it.next() orelse return error.MissingValue;
+        o.vhci = it.next() orelse return error.MissingValue;
     } else if (std.mem.eql(u8, a, "--discovery-port")) {
         o.discovery_port = try std.fmt.parseInt(u16, it.next() orelse return error.MissingValue, 10);
     } else if (std.mem.eql(u8, a, "--reconnect-ms")) {
         o.reconnect_ms = try std.fmt.parseInt(u32, it.next() orelse return error.MissingValue, 10);
+    } else if (std.mem.eql(u8, a, "--config")) {
+        o.config_path = it.next() orelse return error.MissingValue;
     } else if (std.mem.eql(u8, a, "--once")) {
         o.once = true;
     } else {
@@ -146,24 +154,42 @@ fn parseRun(o: *RunOpts, a: []const u8, it: *std.process.Args.Iterator) !void {
     }
 }
 
-fn runMode(io: Io, gpa: std.mem.Allocator, o: RunOpts) !u8 {
-    if (o.host) |host| {
-        log.info("hcibridge run, pinned to {s}:{d}", .{ host, o.port });
+fn runMode(io: Io, gpa: std.mem.Allocator, o: RunArgs) !u8 {
+    var cfg = config.load(gpa, io, o.config_path) catch |err| blk: {
+        log.warn("config {s}: {s} (using defaults)", .{ o.config_path, @errorName(err) });
+        break :blk config.Config{ .arena = std.heap.ArenaAllocator.init(gpa) };
+    };
+    defer cfg.deinit();
+
+    // Resolve with precedence: args, then config, then built-in default.
+    const host = o.host orelse cfg.host;
+    const port = o.port orelse cfg.port orelse 4444;
+    const vhci = o.vhci orelse cfg.vhci orelse "/dev/vhci";
+    const dport = o.discovery_port orelse cfg.discovery_port orelse disc.default_port;
+    const reconnect_ms = o.reconnect_ms orelse cfg.reconnect_ms orelse 1000;
+
+    if (host) |h| {
+        log.info("hcibridge run, pinned to {s}:{d}", .{ h, port });
         while (true) {
-            const addr = Io.net.IpAddress.resolve(io, host, o.port) catch |err| {
-                log.warn("resolve {s}: {s}", .{ host, @errorName(err) });
-                try io.sleep(Io.Duration.fromMilliseconds(o.reconnect_ms), .awake);
+            const addr = Io.net.IpAddress.resolve(io, h, port) catch |err| {
+                log.warn("resolve {s}: {s}", .{ h, @errorName(err) });
+                try io.sleep(Io.Duration.fromMilliseconds(reconnect_ms), .awake);
                 continue;
             };
-            _ = board.run(io, &addr, o.vhci_path, host) catch |err| {
+            _ = board.run(io, &addr, vhci, h) catch |err| {
                 log.warn("session ended: {s}", .{@errorName(err)});
             };
             if (o.once) return 0;
-            try io.sleep(Io.Duration.fromMilliseconds(o.reconnect_ms), .awake);
+            try io.sleep(Io.Duration.fromMilliseconds(reconnect_ms), .awake);
         }
     }
     log.info("hcibridge run, discovery mode", .{});
-    try manager.run(io, gpa, .{ .discovery_port = o.discovery_port, .vhci_path = o.vhci_path });
+    try manager.run(io, gpa, .{
+        .discovery_port = dport,
+        .vhci_path = vhci,
+        .allow = cfg.allow.items,
+        .deny = cfg.deny.items,
+    });
     return 0;
 }
 
@@ -174,4 +200,5 @@ test {
     _ = @import("httpc.zig");
     _ = @import("cli.zig");
     _ = @import("spec.zig");
+    _ = @import("config.zig");
 }

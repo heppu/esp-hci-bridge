@@ -12,7 +12,16 @@ pub const Options = struct {
     discovery_port: u16 = disc.default_port,
     vhci_path: []const u8 = "/dev/vhci",
     probe_interval_ms: u32 = 5000,
+    allow: []const []const u8 = &.{},
+    deny: []const []const u8 = &.{},
 };
+
+fn permits(opts: Options, bdaddr: []const u8) bool {
+    for (opts.deny) |d| if (std.ascii.eqlIgnoreCase(d, bdaddr)) return false;
+    if (opts.allow.len == 0) return true;
+    for (opts.allow) |a| if (std.ascii.eqlIgnoreCase(a, bdaddr)) return true;
+    return false;
+}
 
 const Active = struct {
     mutex: Io.Mutex = .init,
@@ -107,6 +116,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: Options) !void {
             .probe => continue, // another host probing, ignore
         };
 
+        if (!permits(opts, ann.bdaddr)) continue;
         if (!active.claim(ann.bdaddr)) continue;
 
         var addr = msg.from;

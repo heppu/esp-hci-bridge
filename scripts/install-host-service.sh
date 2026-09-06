@@ -35,6 +35,10 @@ install -d /etc/modules-load.d
 install -m 0644 "$ROOT/host/modules-load.conf" /etc/modules-load.d/hci_vhci.conf
 modprobe hci_vhci 2>/dev/null || true
 
+# Native layered config: /etc/hcibridge/config + /etc/hcibridge/config.d/*.conf
+install -d /etc/hcibridge/config.d
+[ -f /etc/hcibridge/config ] || install -m 0644 "$ROOT/host/config/config" /etc/hcibridge/config
+
 if [ -d /run/systemd/system ]; then
     echo "detected: systemd"
     install -m 0644 "$ROOT/host/systemd/hcibridge.service" /etc/systemd/system/hcibridge.service
