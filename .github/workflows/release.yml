@@ -43,13 +43,16 @@ jobs:
         with:
           version: 0.16.0
       - run: zig build test --summary all
-      - run: zig build release
-      - name: Collect static binaries
+      - run: zig build release -Dversion="${GITHUB_REF_NAME}"
+      - name: Generate man page and completions
+        run: zig build gen -Dversion="${GITHUB_REF_NAME}"
+      - name: Collect artifacts
         run: |
           mkdir -p out
           cp zig-out/x86_64-linux-musl/hcibridge   out/hcibridge-x86_64-linux
           cp zig-out/aarch64-linux-musl/hcibridge  out/hcibridge-aarch64-linux
           cp zig-out/arm-linux-musleabihf/hcibridge out/hcibridge-armv7-linux
+          cp zig-out/gen/hcibridge.1 zig-out/gen/hcibridge.bash zig-out/gen/_hcibridge zig-out/gen/hcibridge.fish out/
       - uses: actions/upload-artifact@v4
         with:
           name: cli
@@ -81,6 +84,10 @@ jobs:
             cli/hcibridge-x86_64-linux
             cli/hcibridge-aarch64-linux
             cli/hcibridge-armv7-linux
+            cli/hcibridge.1
+            cli/hcibridge.bash
+            cli/_hcibridge
+            cli/hcibridge.fish
           generate_release_notes: true
 
   pages:

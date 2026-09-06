@@ -13,6 +13,23 @@ echo "building release binary"
 (cd "$ROOT" && zig build -Doptimize=ReleaseSafe)
 install -m 0755 "$ROOT/zig-out/bin/hcibridge" /usr/local/bin/hcibridge
 
+# Shell completions and man page, generated from the binary (single source).
+BIN=/usr/local/bin/hcibridge
+if [ -d /usr/share/bash-completion/completions ]; then
+    "$BIN" completions bash > /usr/share/bash-completion/completions/hcibridge
+fi
+if [ -d /usr/share/zsh/site-functions ]; then
+    "$BIN" completions zsh > /usr/share/zsh/site-functions/_hcibridge
+fi
+if [ -d /usr/share/fish/vendor_completions.d ]; then
+    "$BIN" completions fish > /usr/share/fish/vendor_completions.d/hcibridge.fish
+fi
+install -d /usr/local/share/man/man1
+"$BIN" man > /usr/local/share/man/man1/hcibridge.1
+command -v mandb >/dev/null 2>&1 && mandb -q >/dev/null 2>&1 || true
+command -v makewhatis >/dev/null 2>&1 && makewhatis >/dev/null 2>&1 || true
+echo "installed completions and man page"
+
 # Load the vhci module at boot (systemd-modules-load and most others read this).
 install -d /etc/modules-load.d
 install -m 0644 "$ROOT/host/modules-load.conf" /etc/modules-load.d/hci_vhci.conf

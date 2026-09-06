@@ -55,6 +55,20 @@ esp-hci-bridge     172.16.135.242:4444   a0:a3:b3:2f:61:1e v0.3.0       ota_0
 
 `hcibridge update all firmware.bin` updates every board it can discover.
 
+### Completions and man page
+
+Both are generated from the CLI spec in `host/spec.zig`, so they never drift.
+The installer drops them in place; to do it by hand:
+
+```
+hcibridge completions bash | sudo tee /usr/share/bash-completion/completions/hcibridge
+hcibridge completions zsh  | sudo tee /usr/share/zsh/site-functions/_hcibridge
+hcibridge completions fish | sudo tee /usr/share/fish/vendor_completions.d/hcibridge.fish
+hcibridge man | sudo tee /usr/local/share/man/man1/hcibridge.1
+```
+
+`zig build gen` writes all four into `zig-out/gen/`, and each release ships them.
+
 ## Discovery and multiple boards
 
 By default `hcibridge run` operates in discovery mode: it finds every ESP bridge on

@@ -16,13 +16,18 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    const version = b.option([]const u8, "version", "version string baked into the binary") orelse "dev";
+    const options = b.addOptions();
+    options.addOption([]const u8, "version", version);
+    const build_options = options.createModule();
+
     const daemon = b.addExecutable(.{
         .name = "hcibridge",
         .root_module = b.createModule(.{
             .root_source_file = b.path("host/main.zig"),
             .target = target,
             .optimize = optimize,
-            .imports = &.{ .{ .name = "h4", .module = h4 }, .{ .name = "discovery", .module = discovery } },
+            .imports = &.{ .{ .name = "h4", .module = h4 }, .{ .name = "discovery", .module = discovery }, .{ .name = "build_options", .module = build_options } },
         }),
     });
     b.installArtifact(daemon);
@@ -39,14 +44,14 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(sim);
 
     const test_step = b.step("test", "Run unit and integration tests");
-    const test_roots = [_][]const u8{ "common/h4.zig", "common/discovery.zig", "host/main.zig", "host/sim.zig", "host/httpc.zig", "host/integration_test.zig" };
+    const test_roots = [_][]const u8{ "common/h4.zig", "common/discovery.zig", "host/main.zig", "host/spec.zig", "host/sim.zig", "host/httpc.zig", "host/integration_test.zig" };
     for (test_roots) |root| {
         const t = b.addTest(.{
             .root_module = b.createModule(.{
                 .root_source_file = b.path(root),
                 .target = target,
                 .optimize = optimize,
-                .imports = &.{ .{ .name = "h4", .module = h4 }, .{ .name = "discovery", .module = discovery } },
+                .imports = &.{ .{ .name = "h4", .module = h4 }, .{ .name = "discovery", .module = discovery }, .{ .name = "build_options", .module = build_options } },
             }),
         });
         test_step.dependOn(&b.addRunArtifact(t).step);
@@ -83,6 +88,24 @@ pub fn build(b: *std.Build) void {
         b.step("firmware", "Build the ESP32 Zig object").dependOn(&install_obj.step);
     }
 
+    // `zig build gen` emits man page and completions from the binary (spec).
+    const gen_step = b.step("gen", "Generate man page and shell completions");
+    const GenSpec = struct { args: []const []const u8, out: []const u8 };
+    const gens = [_]GenSpec{
+        .{ .args = &.{"man"}, .out = "hcibridge.1" },
+        .{ .args = &.{ "completions", "bash" }, .out = "hcibridge.bash" },
+        .{ .args = &.{ "completions", "zsh" }, .out = "_hcibridge" },
+        .{ .args = &.{ "completions", "fish" }, .out = "hcibridge.fish" },
+    };
+    for (gens) |g| {
+        const r = b.addRunArtifact(daemon);
+        r.addArgs(g.args);
+        const captured = r.captureStdOut(.{});
+        const inst = b.addInstallFileWithDir(captured, .{ .custom = "gen" }, g.out);
+        gen_step.dependOn(&inst.step);
+    }
+
+    // release cross builds also baked with the same version option.
     const run_daemon = b.addRunArtifact(daemon);
     if (b.args) |args| run_daemon.addArgs(args);
     b.step("run", "Run hcibridged").dependOn(&run_daemon.step);
@@ -113,7 +136,7 @@ pub fn build(b: *std.Build) void {
                 .root_source_file = b.path("host/main.zig"),
                 .target = rt,
                 .optimize = .ReleaseSafe,
-                .imports = &.{ .{ .name = "h4", .module = rh4 }, .{ .name = "discovery", .module = rdisc } },
+                .imports = &.{ .{ .name = "h4", .module = rh4 }, .{ .name = "discovery", .module = rdisc }, .{ .name = "build_options", .module = build_options } },
             }),
         });
         const inst = b.addInstallArtifact(exe, .{ .dest_dir = .{ .override = .{ .custom = triple } } });

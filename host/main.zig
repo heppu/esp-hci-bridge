@@ -14,33 +14,11 @@ const board = @import("board.zig");
 const manager = @import("manager.zig");
 const cli = @import("cli.zig");
 const disc = @import("discovery");
+const spec = @import("spec.zig");
 
 const log = std.log;
 
 pub const std_options: std.Options = .{ .log_level = .info };
-
-const usage =
-    \\usage: hcibridge <command> [options]
-    \\
-    \\commands:
-    \\  run                       daemon: attach bridges to the local BT stack (default)
-    \\  list                      discover bridges and print their firmware versions
-    \\  status <ip>               print one bridge's full status
-    \\  update <ip|all> <file>    push a firmware image over OTA
-    \\
-    \\run options:
-    \\  (none)                    discover all bridges, one adapter each
-    \\  --host <name|ip>          pin a single bridge, skip discovery
-    \\  --port <n>                bridge TCP port for --host (default 4444)
-    \\  --vhci <path>             virtual HCI device (default /dev/vhci)
-    \\  --discovery-port <n>      UDP discovery port (default 4445)
-    \\  --reconnect-ms <n>        retry delay in --host mode (default 1000)
-    \\  --once                    --host mode: exit after the first session
-    \\
-    \\list/update options:
-    \\  --discovery-port <n>      UDP discovery port (default 4445)
-    \\
-;
 
 const RunOpts = struct {
     host: ?[]const u8 = null,
@@ -51,6 +29,21 @@ const RunOpts = struct {
     once: bool = false,
 };
 
+fn printHelp(io: Io, file: Io.File) !void {
+    var buf: [4096]u8 = undefined;
+    var w = file.writer(io, &buf);
+    try spec.writeHelp(&w.interface);
+    try w.interface.flush();
+}
+
+fn emit(io: Io, gen: *const fn (*Io.Writer) anyerror!void) !u8 {
+    var buf: [8192]u8 = undefined;
+    var w = Io.File.stdout().writer(io, &buf);
+    try gen(&w.interface);
+    try w.interface.flush();
+    return 0;
+}
+
 pub fn main(init: std.process.Init) !u8 {
     const io = init.io;
     const gpa = init.gpa;
@@ -60,7 +53,32 @@ pub fn main(init: std.process.Init) !u8 {
     const cmd = it.next() orelse "run";
 
     if (std.mem.eql(u8, cmd, "-h") or std.mem.eql(u8, cmd, "--help") or std.mem.eql(u8, cmd, "help")) {
-        try Io.File.stdout().writeStreamingAll(io, usage);
+        try printHelp(io, Io.File.stdout());
+        return 0;
+    }
+    if (std.mem.eql(u8, cmd, "version") or std.mem.eql(u8, cmd, "--version")) {
+        var buf: [64]u8 = undefined;
+        var w = Io.File.stdout().writer(io, &buf);
+        try w.interface.print("{s} {s}\n", .{ spec.program, spec.version });
+        try w.interface.flush();
+        return 0;
+    }
+    if (std.mem.eql(u8, cmd, "man")) return emit(io, spec.writeMan);
+    if (std.mem.eql(u8, cmd, "completions")) {
+        const shell = it.next() orelse {
+            log.err("usage: hcibridge completions <bash|zsh|fish>", .{});
+            return 2;
+        };
+        var buf: [8192]u8 = undefined;
+        var w = Io.File.stdout().writer(io, &buf);
+        spec.writeCompletion(&w.interface, shell) catch |err| switch (err) {
+            error.UnknownShell => {
+                log.err("unknown shell: {s} (want bash, zsh or fish)", .{shell});
+                return 2;
+            },
+            else => return err,
+        };
+        try w.interface.flush();
         return 0;
     }
     if (std.mem.eql(u8, cmd, "list")) {
@@ -101,7 +119,7 @@ pub fn main(init: std.process.Init) !u8 {
             return runMode(io, gpa, o);
         }
         log.err("unknown command: {s}", .{cmd});
-        try Io.File.stderr().writeStreamingAll(io, usage);
+        try printHelp(io, Io.File.stderr());
         return 2;
     }
 
@@ -155,4 +173,5 @@ test {
     _ = @import("manager.zig");
     _ = @import("httpc.zig");
     _ = @import("cli.zig");
+    _ = @import("spec.zig");
 }

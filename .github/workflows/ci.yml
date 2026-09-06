@@ -16,6 +16,7 @@ jobs:
       - run: zig build test --summary all
       - run: zig build -Doptimize=ReleaseSafe
       - run: zig build release
+      - run: zig build gen
 
   firmware:
     runs-on: ubuntu-latest
