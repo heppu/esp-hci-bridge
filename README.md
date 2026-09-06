@@ -217,6 +217,11 @@ answer probes. TCP keepalive drops a dead peer in about ten seconds.
 
 ## Status
 
+> **Upgrading from v0.9.0?** That release could not confirm an OTA-installed
+> image, so boards updated *onto* v0.9.0 refuse further updates and roll back
+> on reset. Power-cycle the board once (it returns to its previous firmware),
+> then update to v0.9.1 or later. Boards flashed over USB are unaffected.
+
 The bridge is complete and runs on real hardware: pairing, input, discovery,
 per-board adapters, OTA updates, and rollback all work over 100 m of Ethernet.
 Xbox Series controllers need current firmware to pair cleanly (update via a

@@ -92,6 +92,15 @@ static esp_err_t ota_post(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t reboot_post(httpd_req_t *req)
+{
+    httpd_resp_sendstr(req, "rebooting\n");
+    ESP_LOGI(TAG, "reboot requested");
+    vTaskDelay(pdMS_TO_TICKS(300));
+    esp_restart();
+    return ESP_OK;
+}
+
 void ota_init(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
@@ -103,8 +112,10 @@ void ota_init(void)
 
     const httpd_uri_t status_uri = { .uri = "/", .method = HTTP_GET, .handler = status_get };
     const httpd_uri_t ota_uri = { .uri = "/ota", .method = HTTP_POST, .handler = ota_post };
+    const httpd_uri_t reboot_uri = { .uri = "/reboot", .method = HTTP_POST, .handler = reboot_post };
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &status_uri));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &ota_uri));
+    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &reboot_uri));
     ESP_LOGI(TAG, "http status on /, updates via POST /ota");
 }
 

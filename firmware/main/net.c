@@ -23,6 +23,8 @@ static void on_got_ip(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     const ip_event_got_ip_t *ev = data;
     ESP_LOGI(TAG, "ip " IPSTR " gw " IPSTR, IP2STR(&ev->ip_info.ip), IP2STR(&ev->ip_info.gw));
+    // Network is up: confirm this image so rollback is cancelled and OTA is allowed.
+    ota_confirm();
 }
 
 // ---------------------------------------------------------------------------
