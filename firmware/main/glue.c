@@ -124,6 +124,11 @@ int glue_send(int fd, const void *buf, size_t len)
     return (int)len;
 }
 
+void glue_shutdown(int fd)
+{
+    shutdown(fd, SHUT_RDWR);
+}
+
 void glue_close(int fd)
 {
     shutdown(fd, SHUT_RDWR);
@@ -257,6 +262,8 @@ static void bt_init(void)
 // ---------------------------------------------------------------------------
 
 #define DISCOVERY_PORT 4445
+#define ANNOUNCE_INTERVAL_MS 2000
+#define PROBE_REPLIES_PER_S 5
 
 static void discovery_task(void *arg)
 {
@@ -291,29 +298,43 @@ static void discovery_task(void *arg)
         .sin_addr.s_addr = htonl(INADDR_BROADCAST),
     };
 
-    // Non-blocking receive so one task can both broadcast and answer probes.
-    struct timeval tv = { .tv_sec = 2, .tv_usec = 0 };
+    struct timeval tv = { .tv_sec = 1, .tv_usec = 0 };
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
     ESP_LOGI(TAG, "discovery announcing on udp %d", DISCOVERY_PORT);
+    uint32_t last_announce = glue_millis() - ANNOUNCE_INTERVAL_MS;
+    uint32_t reply_window = 0;
+    int replies = 0;
     while (1) {
-        // Signed with the board key once claimed, so the host can drop spoofed announces.
-        char sig[40];
-        auth_announce_sig(bdaddr, (unsigned)CONFIG_BRIDGE_TCP_PORT, CONFIG_BRIDGE_HOSTNAME, sig, sizeof(sig));
-        alen = snprintf(announce, sizeof(announce), "ESPHCI1\tANNOUNCE\t%s\t%u\t%s\t%s\n",
-                        bdaddr, (unsigned)CONFIG_BRIDGE_TCP_PORT, CONFIG_BRIDGE_HOSTNAME, sig);
-        sendto(fd, announce, alen, 0, (struct sockaddr *)&bcast, sizeof(bcast));
+        uint32_t now = glue_millis();
+        if (now - last_announce >= ANNOUNCE_INTERVAL_MS) {
+            last_announce = now;
+            // The signature binds the board address, so nothing goes out until there is one.
+            char ip[16], sig[40];
+            alen = 0;
+            if (net_ip_str(ip, sizeof(ip))) {
+                auth_announce_sig(bdaddr, (unsigned)CONFIG_BRIDGE_TCP_PORT, CONFIG_BRIDGE_HOSTNAME, ip, sig, sizeof(sig));
+                alen = snprintf(announce, sizeof(announce), "ESPHCI1\tANNOUNCE\t%s\t%u\t%s\t%s\n",
+                                bdaddr, (unsigned)CONFIG_BRIDGE_TCP_PORT, CONFIG_BRIDGE_HOSTNAME, sig);
+                sendto(fd, announce, alen, 0, (struct sockaddr *)&bcast, sizeof(bcast));
+            }
+        }
 
-        // Drain any probes that arrived during the 2s window, reply to each.
         char buf[64];
         struct sockaddr_in from;
         socklen_t flen = sizeof(from);
         int n = recvfrom(fd, buf, sizeof(buf) - 1, 0, (struct sockaddr *)&from, &flen);
-        if (n > 0) {
-            buf[n] = 0;
-            if (strncmp(buf, "ESPHCI1\tPROBE", 13) == 0) {
-                sendto(fd, announce, alen, 0, (struct sockaddr *)&from, flen);
-            }
+        if (n <= 0 || alen == 0) continue;
+        buf[n] = 0;
+        if (strncmp(buf, "ESPHCI1\tPROBE", 13) != 0) continue;
+        now = glue_millis();
+        if (now - reply_window >= 1000) {
+            reply_window = now;
+            replies = 0;
+        }
+        if (replies < PROBE_REPLIES_PER_S) {
+            replies++;
+            sendto(fd, announce, alen, 0, (struct sockaddr *)&from, flen);
         }
     }
 }

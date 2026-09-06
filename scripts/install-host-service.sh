@@ -4,18 +4,34 @@
 set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 
+build() {
+    cd "$ROOT"
+    zig build -Doptimize=ReleaseSafe "-Dversion=$(git describe --tags --always 2>/dev/null || echo dev)"
+}
+
+if [ "${1:-}" = --build-only ]; then
+    build
+    exit 0
+fi
+
 if [ "$(id -u)" -ne 0 ]; then
     echo "run as root: doas $0" >&2
     exit 1
 fi
 
 echo "building release binary"
-(cd "$ROOT" && zig build -Doptimize=ReleaseSafe)
+# Build as the invoking user so zig-cache and zig-out in the checkout stay theirs.
+BUILD_USER=${SUDO_USER:-${DOAS_USER:-}}
+if [ -n "$BUILD_USER" ] && [ "$BUILD_USER" != root ]; then
+    su -s /bin/sh "$BUILD_USER" -c "'$ROOT/scripts/install-host-service.sh' --build-only"
+else
+    build
+fi
 install -m 0755 "$ROOT/zig-out/bin/hcibridge" /usr/bin/hcibridge
 
-# Stop any hand-run daemon (old or new name) so it does not fight the service
-# for /dev/vhci. Only targets in-tree binaries, not the installed one.
-pkill -f "zig-out/bin/hcibridge" 2>/dev/null || true
+# Stop any hand-run in-tree daemon so it does not fight the service for /dev/vhci.
+# Anchored so it leaves hcibridge-sim and the installed binary alone.
+pkill -f '(^|/)zig-out/bin/hcibridge( |$)' 2>/dev/null || true
 
 # Shell completions and man page, generated from the binary (single source).
 BIN=/usr/bin/hcibridge

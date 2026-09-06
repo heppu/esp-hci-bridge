@@ -67,7 +67,11 @@ pub const Session = struct {
     /// packet counters. A clean remote close is not an error.
     pub fn run(self: *Session) !Stats {
         var to_local = try self.io.concurrent(pumpTcpToLocal, .{self});
-        var to_tcp = try self.io.concurrent(pumpLocalToTcp, .{self});
+        var to_tcp = self.io.concurrent(pumpLocalToTcp, .{self}) catch |err| {
+            self.shutdown();
+            to_local.await(self.io);
+            return err;
+        };
         to_local.await(self.io);
         to_tcp.await(self.io);
         if (self.first_error) |err| return err;
@@ -168,4 +172,7 @@ pub fn tuneSocket(fd: posix.fd_t) !void {
     try posix.setsockopt(fd, posix.IPPROTO.TCP, linux.TCP.KEEPIDLE, std.mem.asBytes(&idle));
     try posix.setsockopt(fd, posix.IPPROTO.TCP, linux.TCP.KEEPINTVL, std.mem.asBytes(&intvl));
     try posix.setsockopt(fd, posix.IPPROTO.TCP, linux.TCP.KEEPCNT, std.mem.asBytes(&cnt));
+    // Caps retransmit backoff so a board that dies mid-traffic drops the session quickly.
+    const user_timeout_ms: c_uint = 10_000;
+    try posix.setsockopt(fd, posix.IPPROTO.TCP, linux.TCP.USER_TIMEOUT, std.mem.asBytes(&user_timeout_ms));
 }

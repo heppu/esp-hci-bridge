@@ -173,7 +173,7 @@ fn clientThread(ctx: *ClientCtx) void {
             ctx.io.sleep(Io.Duration.fromMilliseconds(ctx.reconnect_ms), .awake) catch {};
             continue;
         };
-        _ = board.run(ctx.io, &addr, ctx.vhci, ctx.host, &ctx.psk) catch |err| {
+        _ = board.run(ctx.io, &addr, ctx.vhci, ctx.host, &ctx.psk, null) catch |err| {
             log.warn("[{s}] session ended: {s}", .{ ctx.host, @errorName(err) });
         };
         ctx.io.sleep(Io.Duration.fromMilliseconds(ctx.reconnect_ms), .awake) catch {};
@@ -232,8 +232,11 @@ fn runMode(io: Io, gpa: std.mem.Allocator, args: []const []const u8, env_map: *s
     // Pinned client boards each get their own reconnecting thread. A pinned
     // board is matched to a key by its address ("psk = <ip>=<hex>" works too),
     // or by the only key when there is exactly one.
+    var pinned: std.ArrayList([]const u8) = .empty;
+    defer pinned.deinit(gpa);
     for (s.clients) |client| {
         const hp = splitHostPort(client, s.port);
+        try pinned.append(gpa, hp.host);
         const psk = settings.lookupPsk(s.psk, hp.host) orelse
             (if (s.psk.len == 1) settings.lookupPsk(s.psk, s.psk[0][0 .. std.mem.indexOfScalar(u8, s.psk[0], '=') orelse 0]) else null) orelse {
             log.err("no key for pinned board {s}: run `hcibridge claim {s}`", .{ hp.host, hp.host });
@@ -244,7 +247,7 @@ fn runMode(io: Io, gpa: std.mem.Allocator, args: []const []const u8, env_map: *s
         if (s.once and s.clients.len == 1 and !s.discovery) {
             // one-shot for scripting/tests
             const addr = try Io.net.IpAddress.resolve(io, hp.host, hp.port);
-            _ = board.run(io, &addr, s.vhci, hp.host, &psk) catch {};
+            _ = board.run(io, &addr, s.vhci, hp.host, &psk, null) catch {};
             return 0;
         }
         const t = try std.Thread.spawn(.{}, clientThread, .{ctx});
@@ -262,6 +265,7 @@ fn runMode(io: Io, gpa: std.mem.Allocator, args: []const []const u8, env_map: *s
             .allow = s.allow,
             .deny = s.deny,
             .psk_entries = s.psk,
+            .pinned = pinned.items,
         });
         return 0;
     }

@@ -2,7 +2,6 @@
 # Leave BRIDGE_HOST empty for auto-discovery (finds every bridge on the LAN,
 # each gets its own adapter). Set it to pin a single board and skip discovery.
 BRIDGE_HOST=""
-BRIDGE_PORT="4444"
 BRIDGE_VHCI="/dev/vhci"
 # Extra flags, e.g. "--reconnect-ms 500"
 BRIDGE_ARGS=""

@@ -11,21 +11,42 @@ const X25519 = std.crypto.dh.X25519;
 
 pub const default_config = "/etc/hcibridge/config";
 
-/// Loads psk entries from the config (main + .d). Caller deinit()s.
-fn loadKeys(io: Io, gpa: std.mem.Allocator, cfg_path: []const u8) !settings.Settings {
-    var raw = config.loadRaw(gpa, io, cfg_path) catch config.Raw{ .arena = std.heap.ArenaAllocator.init(gpa) };
-    defer raw.deinit();
-    return settings.resolve(gpa, raw.pairs.items, &.{}, null, null);
+fn envGet(ctx: ?*anyopaque, name: []const u8) ?[]const u8 {
+    const env: *const std.process.Environ = @ptrCast(@alignCast(ctx.?));
+    return env.getPosix(name);
 }
 
-fn boardInfo(io: Io, gpa: std.mem.Allocator, addr: *const Io.net.IpAddress, bdaddr_out: *[17]u8) !struct { bdaddr: []const u8, claimed: ?bool } {
+/// Loads psk entries from the config (main + .d) and HCIBRIDGE_PSK. Caller deinit()s.
+fn loadKeys(io: Io, gpa: std.mem.Allocator, cfg_path: []const u8) !settings.Settings {
+    var raw = config.loadRaw(gpa, io, cfg_path) catch |err| blk: {
+        log.warn("config {s}: {s} (using defaults)", .{ cfg_path, @errorName(err) });
+        break :blk config.Raw{ .arena = std.heap.ArenaAllocator.init(gpa) };
+    };
+    defer raw.deinit();
+    // The process Io is always Io.Threaded (see start.zig), which carries the environ.
+    const threaded: *Io.Threaded = @ptrCast(@alignCast(io.userdata));
+    var env = threaded.environ.process_environ;
+    return settings.resolve(gpa, raw.pairs.items, &.{}, envGet, @ptrCast(&env));
+}
+
+const BoardInfo = struct {
+    bdaddr: []const u8,
+    /// null: firmware before v0.10 (no key support at all)
+    claimed: ?bool,
+    /// null: firmware before v0.10.3 (replayable proofs, see auth.httpAuthLegacy)
+    nonce: ?auth.HttpNonce,
+};
+
+fn boardInfo(io: Io, gpa: std.mem.Allocator, addr: *const Io.net.IpAddress, bdaddr_out: *[17]u8) !BoardInfo {
     var r = try httpc.get(io, gpa, addr, "/");
     defer r.deinit(gpa);
-    var buf: [32]u8 = undefined;
+    var buf: [48]u8 = undefined;
     const b = httpc.jsonField(r.body, "bdaddr", &buf) orelse return error.NoBdaddr;
     if (b.len != 17) return error.NoBdaddr;
     @memcpy(bdaddr_out, b);
-    return .{ .bdaddr = bdaddr_out, .claimed = httpc.jsonBool(r.body, "claimed") };
+    var nbuf: [48]u8 = undefined;
+    const nonce = if (httpc.jsonField(r.body, "nonce", &nbuf)) |h| auth.hexToNonce(h) else null;
+    return .{ .bdaddr = bdaddr_out, .claimed = httpc.jsonBool(r.body, "claimed"), .nonce = nonce };
 }
 
 const log = std.log;
@@ -59,16 +80,9 @@ pub fn collect(io: Io, gpa: std.mem.Allocator, discovery_port: u16, window_ms: u
     sock.send(io, &bcast, disc.buildProbe(&pbuf)) catch {};
 
     var rbuf: [disc.max_datagram]u8 = undefined;
-    const tick_ms: u32 = 250;
-    var ticks = @max(@as(u32, 1), window_ms / tick_ms);
-    while (ticks > 0) {
-        const msg = sock.receiveTimeout(io, &rbuf, .{ .duration = .{ .raw = Io.Duration.fromMilliseconds(tick_ms), .clock = .awake } }) catch |err| switch (err) {
-            error.Timeout => {
-                ticks -= 1;
-                continue;
-            },
-            else => break,
-        };
+    const deadline = Io.Clock.Timestamp.fromNow(io, .{ .raw = Io.Duration.fromMilliseconds(window_ms), .clock = .awake });
+    while (deadline.durationFromNow(io).raw.nanoseconds > 0) {
+        const msg = sock.receiveTimeout(io, &rbuf, .{ .deadline = deadline }) catch break;
         const parsed = disc.parse(msg.data) catch continue;
         const ann = switch (parsed) {
             .announce => |a| a,
@@ -161,9 +175,17 @@ fn readFile(io: Io, gpa: std.mem.Allocator, path: []const u8) ![]u8 {
     return out.toOwnedSlice(gpa);
 }
 
-fn authHeader(psk: *const auth.Psk, method: []const u8, path: []const u8, body: []const u8, out: *[80]u8) []const u8 {
+/// Both proof headers on one line pair, or the legacy single header for
+/// boards that publish no nonce.
+fn authHeaders(psk: *const auth.Psk, method: []const u8, path: []const u8, nonce: ?auth.HttpNonce, body: []const u8, out: *[160]u8) []const u8 {
     var mac: [auth.mac_len * 2]u8 = undefined;
-    _ = auth.httpAuth(psk, method, path, body, &mac);
+    if (nonce) |n| {
+        var pre: [auth.mac_len * 2]u8 = undefined;
+        _ = auth.httpAuth(psk, method, path, &n, body, &mac);
+        _ = auth.httpPre(psk, method, path, &n, @intCast(body.len), &pre);
+        return std.fmt.bufPrint(out, "X-Bridge-Auth: {s}\r\nX-Bridge-Pre: {s}", .{ &mac, &pre }) catch unreachable;
+    }
+    _ = auth.httpAuthLegacy(psk, method, path, body, &mac);
     return std.fmt.bufPrint(out, "X-Bridge-Auth: {s}", .{&mac}) catch unreachable;
 }
 
@@ -175,14 +197,14 @@ fn updateOne(io: Io, gpa: std.mem.Allocator, addr: *const Io.net.IpAddress, imag
     };
     // Firmware before v0.10 reports no claim state and takes unauthenticated
     // uploads, which is the only way to move such a board onto keyed firmware.
-    var hbuf: [80]u8 = undefined;
+    var hbuf: [160]u8 = undefined;
     var hdr: ?[]const u8 = null;
     if (info.claimed != null) {
         const psk = settings.lookupPsk(keys.psk, info.bdaddr) orelse {
             log.err("no key for {s} ({f}): run `hcibridge claim` first", .{ info.bdaddr, addr.* });
             return false;
         };
-        hdr = authHeader(&psk, "POST", "/ota", image, &hbuf);
+        hdr = authHeaders(&psk, "POST", "/ota", info.nonce, image, &hbuf);
     } else log.warn("{f} runs pre-key firmware, sending unauthenticated update", .{addr.*});
     log.info("updating {f} ({s}), {d} bytes", .{ addr.*, info.bdaddr, image.len });
     var r = httpc.postH(io, gpa, addr, "/ota", image, hdr) catch |err| {
@@ -244,8 +266,8 @@ pub fn reboot(io: Io, gpa: std.mem.Allocator, ip: []const u8, cfg_path: []const 
         log.err("no key for {s}: run `hcibridge claim {s}` first", .{ info.bdaddr, ip });
         return 1;
     };
-    var hbuf: [80]u8 = undefined;
-    const hdr = authHeader(&psk, "POST", "/reboot", "", &hbuf);
+    var hbuf: [160]u8 = undefined;
+    const hdr = authHeaders(&psk, "POST", "/reboot", info.nonce, "", &hbuf);
     var r = try httpc.postH(io, gpa, &addr, "/reboot", "", hdr);
     defer r.deinit(gpa);
     if (r.status != 200) {
@@ -285,6 +307,10 @@ pub fn claim(io: Io, gpa: std.mem.Allocator, ip: []const u8, cfg_path: []const u
     }
     const board_hex = std.mem.trim(u8, r.body, " \r\n");
     var board_pk: [32]u8 = undefined;
+    if (board_hex.len != board_pk.len * 2) {
+        log.err("bad board public key in reply: {d} chars, want 64", .{board_hex.len});
+        return 1;
+    }
     _ = std.fmt.hexToBytes(&board_pk, board_hex) catch {
         log.err("bad board public key in reply", .{});
         return 1;
@@ -309,12 +335,16 @@ pub fn claim(io: Io, gpa: std.mem.Allocator, ip: []const u8, cfg_path: []const u
         var out = Io.File.stdout().writer(io, &obuf);
         try out.interface.print("# add this line to {s} (or a .d drop-in):\n{s}", .{ cfg_path, line });
         try out.interface.flush();
+        return 3;
     }
     return 0;
 }
 
+/// Writes a secret: created 0600, and re-chmodded in case the file already existed.
 fn writeFile(io: Io, path: []const u8, data: []const u8) !void {
-    const f = try Io.Dir.cwd().createFile(io, path, .{ .truncate = true });
+    const mode: Io.File.Permissions = .fromMode(0o600);
+    const f = try Io.Dir.cwd().createFile(io, path, .{ .truncate = true, .permissions = mode });
     defer f.close(io);
+    try f.setPermissions(io, mode);
     try f.writeStreamingAll(io, data);
 }

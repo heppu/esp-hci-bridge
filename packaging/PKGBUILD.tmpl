@@ -8,7 +8,7 @@ url="https://github.com/heppu/esp-hci-bridge"
 license=('MIT')
 depends=('bluez')
 makedepends=('zig')
-backup=('etc/hcibridge/config')
+backup=('etc/hcibridge/config' 'etc/hcibridge/config.d/50-example.conf' 'etc/default/hcibridge')
 source=("$pkgname-$pkgver.tar.gz::https://github.com/heppu/esp-hci-bridge/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('@SHA256@')
 

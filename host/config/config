@@ -6,7 +6,8 @@
 # Drop-in fragments in /etc/hcibridge/config.d/*.conf are merged on top of this
 # file, sorted by name. Scalars are last-wins, lists (client/allow/deny/psk) add up.
 #
-# Format: key = value   ('#' or ';' begins a comment)
+# Format: key = value   ('#' or ';' begins a comment, also after a value)
+# Unknown keys and values that do not parse are logged and ignored.
 
 # Auto-discover boards on the LAN.            env HCIBRIDGE_DISCOVERY
 # discovery = on
@@ -40,6 +41,7 @@
 # deny = aa:bb:cc:dd:ee:ff
 
 # Board keys. 'hcibridge claim <ip>' pairs a board with this PC and writes one
-# of these to config.d/board-<bdaddr>.conf. A board without a key here is
-# never attached. env HCIBRIDGE_PSK (comma-separated)
+# of these to config.d/board-<bdaddr>.conf (mode 0600). A board without a key
+# here is never attached. The last entry for a board wins.
+# env HCIBRIDGE_PSK (comma-separated)
 # psk = a0:a3:b3:2f:61:1e=0123...cdef

@@ -114,10 +114,12 @@ jobs:
               PKG_ARCH="$arch" nfpm pkg -f packaging/nfpm.yaml -p "$fmt" -t out/
             done
           done
-          # AUR PKGBUILD and Alpine APKBUILD with version + source checksum
-          SHA=$(curl -sL "https://github.com/heppu/esp-hci-bridge/archive/refs/tags/${GITHUB_REF_NAME}.tar.gz" | sha256sum | cut -d' ' -f1)
+          # AUR PKGBUILD, Alpine APKBUILD and Void template with version + source checksum
+          curl -sSfL -o src.tar.gz "https://github.com/heppu/esp-hci-bridge/archive/refs/tags/${GITHUB_REF_NAME}.tar.gz"
+          SHA=$(sha256sum src.tar.gz | cut -d' ' -f1)
+          SHA512=$(sha512sum src.tar.gz | cut -d' ' -f1)
           sed -e "s/@PKGVER@/$VER/" -e "s/@SHA256@/$SHA/" packaging/PKGBUILD.tmpl > out/PKGBUILD
-          sed -e "s/@PKGVER@/$VER/" packaging/APKBUILD.tmpl > out/APKBUILD
+          sed -e "s/@PKGVER@/$VER/" -e "s/@SHA512@/$SHA512/" packaging/APKBUILD.tmpl > out/APKBUILD
           sed -e "s/@PKGVER@/$VER/" -e "s/@SHA256@/$SHA/" packaging/void-template.tmpl > out/void-template
           ls -1 out/
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -144,13 +146,15 @@ jobs:
       - name: Assemble assets
         run: |
           mkdir -p release
-          # per-board firmware images, named by board
+          # app image and bootloader differ per board, partition table and OTA data do not
           for b in olimex-esp32-poe wt32-eth01 generic-wifi; do
             cp "_site/firmware/$b/esp-hci-bridge.bin" "release/esp-hci-bridge-$b.bin"
-            cp "_site/manifest-$b.json" "release/manifest-$b.json"
+            cp "_site/firmware/$b/bootloader.bin" "release/bootloader-$b.bin"
+            for f in partition-table.bin ota_data_initial.bin; do
+              [ -f "_site/firmware/$b/$f" ] || continue
+              if [ -f "release/$f" ]; then cmp "_site/firmware/$b/$f" "release/$f"; else cp "_site/firmware/$b/$f" release/; fi
+            done
           done
-          # shared bootloader/partition table are identical across boards
-          cp _site/firmware/olimex-esp32-poe/bootloader.bin _site/firmware/olimex-esp32-poe/partition-table.bin release/
           cp cli/* release/
           chmod +x release/hcibridge-*
           cd release && sha256sum * > SHA256SUMS && cat SHA256SUMS

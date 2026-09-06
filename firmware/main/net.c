@@ -19,12 +19,28 @@
 
 static const char *TAG = "net";
 
+static volatile uint32_t g_ip4 = 0;
+
 static void on_got_ip(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     const ip_event_got_ip_t *ev = data;
     ESP_LOGI(TAG, "ip " IPSTR " gw " IPSTR, IP2STR(&ev->ip_info.ip), IP2STR(&ev->ip_info.gw));
+    g_ip4 = ev->ip_info.ip.addr;
     // Network is up: confirm this image so rollback is cancelled and OTA is allowed.
     ota_confirm();
+}
+
+static void on_lost_ip(void *arg, esp_event_base_t base, int32_t id, void *data)
+{
+    ESP_LOGW(TAG, "ip lost");
+    g_ip4 = 0;
+}
+
+bool net_ip_str(char *out, size_t len)
+{
+    esp_ip4_addr_t a = { .addr = g_ip4 };
+    if (a.addr == 0) return false;
+    return snprintf(out, len, IPSTR, IP2STR(&a)) < (int)len;
 }
 
 // ---------------------------------------------------------------------------
@@ -86,6 +102,7 @@ static void net_start_eth(void)
     ESP_ERROR_CHECK(esp_netif_attach(netif, esp_eth_new_netif_glue(eth_handle)));
     ESP_ERROR_CHECK(esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, eth_event, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, on_got_ip, NULL));
+    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_LOST_IP, on_lost_ip, NULL));
     ESP_ERROR_CHECK(esp_eth_start(eth_handle));
     ESP_LOGI(TAG, "ethernet started (MDC=%d MDIO=%d clk_gpio=%d addr=%d)",
              CONFIG_BRIDGE_ETH_MDC_GPIO, CONFIG_BRIDGE_ETH_MDIO_GPIO,
@@ -145,10 +162,13 @@ static void wifi_connect(const char *ssid, const char *pass)
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_got_ip, NULL));
+    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_LOST_IP, on_lost_ip, NULL));
 
+    // Neither field needs a terminator, strlcpy would cut a full-length value.
     wifi_config_t wc = {0};
-    strlcpy((char *)wc.sta.ssid, ssid, sizeof(wc.sta.ssid));
-    strlcpy((char *)wc.sta.password, pass, sizeof(wc.sta.password));
+    size_t sl = strlen(ssid), pl = strlen(pass);
+    memcpy(wc.sta.ssid, ssid, sl < sizeof(wc.sta.ssid) ? sl : sizeof(wc.sta.ssid));
+    memcpy(wc.sta.password, pass, pl < sizeof(wc.sta.password) ? pl : sizeof(wc.sta.password));
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wc));
     ESP_ERROR_CHECK(esp_wifi_start());

@@ -6,6 +6,8 @@ const std = @import("std");
 const Io = std.Io;
 
 pub const http_port: u16 = 80;
+/// Largest response accepted, header and body together.
+pub const max_body: usize = 1 << 20;
 
 pub const Response = struct {
     status: u16,
@@ -16,15 +18,41 @@ pub const Response = struct {
     }
 };
 
-fn contentLength(head: []const u8) ?usize {
+fn contentLength(head: []const u8) ?u64 {
     var lines = std.mem.splitSequence(u8, head, "\r\n");
     while (lines.next()) |line| {
         const colon = std.mem.indexOfScalar(u8, line, ':') orelse continue;
         if (std.ascii.eqlIgnoreCase(std.mem.trim(u8, line[0..colon], " "), "content-length")) {
-            return std.fmt.parseInt(usize, std.mem.trim(u8, line[colon + 1 ..], " "), 10) catch null;
+            return std.fmt.parseInt(u64, std.mem.trim(u8, line[colon + 1 ..], " "), 10) catch null;
         }
     }
     return null;
+}
+
+/// Total bytes to expect once the header is in, null while the header is
+/// incomplete or carries no Content-Length.
+fn expectedLen(buf: []const u8) error{ResponseTooLarge}!?usize {
+    const sep = std.mem.indexOf(u8, buf, "\r\n\r\n") orelse return null;
+    const cl = contentLength(buf[0..sep]) orelse return null;
+    if (cl > max_body) return error.ResponseTooLarge;
+    return std.math.add(usize, sep + 4, @intCast(cl)) catch error.ResponseTooLarge;
+}
+
+fn parseResponse(gpa: std.mem.Allocator, bytes: []const u8) !Response {
+    const sep = std.mem.indexOf(u8, bytes, "\r\n\r\n") orelse return error.BadResponse;
+    const head = bytes[0..sep];
+    var body = bytes[sep + 4 ..];
+    if (contentLength(head)) |cl| {
+        if (cl < body.len) body = body[0..@intCast(cl)];
+    }
+
+    var lines = std.mem.splitSequence(u8, head, "\r\n");
+    const status_line = lines.next() orelse return error.BadResponse;
+    var parts = std.mem.tokenizeScalar(u8, status_line, ' ');
+    _ = parts.next() orelse return error.BadResponse;
+    const code_s = parts.next() orelse return error.BadResponse;
+    const status = std.fmt.parseInt(u16, code_s, 10) catch return error.BadResponse;
+    return .{ .status = status, .body = try gpa.dupe(u8, body) };
 }
 
 /// Reads a full HTTP response. Honors Content-Length so it does not hang on a
@@ -34,41 +62,24 @@ fn readResponse(io: Io, stream: Io.net.Stream, gpa: std.mem.Allocator) !Response
     defer buf.deinit(gpa);
     var rbuf: [4096]u8 = undefined;
     var reader = stream.reader(io, &rbuf);
-
     const r = &reader.interface;
-    var header_end: ?usize = null;
-    var want: ?usize = null; // total bytes = header_end + 4 + content-length
 
     while (true) {
-        if (header_end == null) {
-            if (std.mem.indexOf(u8, buf.items, "\r\n\r\n")) |sep| {
-                header_end = sep;
-                if (contentLength(buf.items[0..sep])) |cl| want = sep + 4 + cl;
-            }
-        }
-        if (want) |w| if (buf.items.len >= w) break;
+        if (try expectedLen(buf.items)) |want| {
+            if (buf.items.len >= want) break;
+        } else if (buf.items.len > max_body) return error.ResponseTooLarge;
 
-        // Block for at least one byte, then drain whatever is buffered. This
-        // returns as data arrives instead of waiting to fill a fixed buffer.
-        r.fill(1) catch break; // EndOfStream ends the read
+        // fill(1) returns as soon as anything arrives instead of filling the buffer.
+        r.fill(1) catch |err| switch (err) {
+            error.EndOfStream => break,
+            else => return err,
+        };
         const avail = r.buffered();
         if (avail.len == 0) break;
         try buf.appendSlice(gpa, avail);
         r.tossBuffered();
     }
-
-    const sep = header_end orelse return error.BadResponse;
-    const head = buf.items[0..sep];
-    const body_all = buf.items[sep + 4 ..];
-    const body = if (want) |w| buf.items[sep + 4 .. @min(w, buf.items.len)] else body_all;
-
-    var lines = std.mem.splitSequence(u8, head, "\r\n");
-    const status_line = lines.next() orelse return error.BadResponse;
-    var parts = std.mem.tokenizeScalar(u8, status_line, ' ');
-    _ = parts.next() orelse return error.BadResponse;
-    const code_s = parts.next() orelse return error.BadResponse;
-    const status = std.fmt.parseInt(u16, code_s, 10) catch return error.BadResponse;
-    return .{ .status = status, .body = try gpa.dupe(u8, body) };
+    return parseResponse(gpa, buf.items);
 }
 
 pub fn get(io: Io, gpa: std.mem.Allocator, addr: *const Io.net.IpAddress, path: []const u8) !Response {
@@ -132,8 +143,33 @@ pub fn jsonField(body: []const u8, key: []const u8, out: []u8) ?[]const u8 {
 const testing = std.testing;
 
 test "contentLength parsing" {
-    try testing.expectEqual(@as(?usize, 3), contentLength("HTTP/1.1 200 OK\r\nContent-Length: 3"));
-    try testing.expectEqual(@as(?usize, null), contentLength("HTTP/1.1 200 OK"));
+    try testing.expectEqual(@as(?u64, 3), contentLength("HTTP/1.1 200 OK\r\nContent-Length: 3"));
+    try testing.expectEqual(@as(?u64, null), contentLength("HTTP/1.1 200 OK"));
+}
+
+test "expectedLen waits for the header and caps Content-Length" {
+    try testing.expectEqual(@as(?usize, null), try expectedLen("HTTP/1.1 200 OK\r\nContent-Length: 3\r\n"));
+    try testing.expectEqual(@as(?usize, null), try expectedLen("HTTP/1.1 200 OK\r\n\r\nabc"));
+    const head = "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\n";
+    try testing.expectEqual(@as(?usize, head.len + 3), try expectedLen(head ++ "a"));
+    try testing.expectError(error.ResponseTooLarge, expectedLen("HTTP/1.1 200 OK\r\nContent-Length: 1048577\r\n\r\n"));
+    try testing.expectError(error.ResponseTooLarge, expectedLen("HTTP/1.1 200 OK\r\nContent-Length: 18446744073709551615\r\n\r\n"));
+}
+
+test "parseResponse splits status and body" {
+    var r = try parseResponse(testing.allocator, "HTTP/1.1 404 Not Found\r\nContent-Length: 3\r\n\r\nabcdef");
+    defer r.deinit(testing.allocator);
+    try testing.expectEqual(@as(u16, 404), r.status);
+    try testing.expectEqualStrings("abc", r.body);
+
+    var r2 = try parseResponse(testing.allocator, "HTTP/1.1 200 OK\r\n\r\n{\"a\":1}");
+    defer r2.deinit(testing.allocator);
+    try testing.expectEqual(@as(u16, 200), r2.status);
+    try testing.expectEqualStrings("{\"a\":1}", r2.body);
+
+    try testing.expectError(error.BadResponse, parseResponse(testing.allocator, "HTTP/1.1 200 OK\r\n"));
+    try testing.expectError(error.BadResponse, parseResponse(testing.allocator, "HTTP/1.1 abc\r\n\r\n"));
+    try testing.expectError(error.BadResponse, parseResponse(testing.allocator, "\r\n\r\n"));
 }
 
 test "jsonField extracts value" {
