@@ -1,5 +1,8 @@
 # esp-hci-bridge
 
+[![ci](https://github.com/heppu/esp-hci-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/heppu/esp-hci-bridge/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/heppu/esp-hci-bridge)](https://github.com/heppu/esp-hci-bridge/releases/latest)
+
 Use Bluetooth devices that are nowhere near your computer.
 
 A tiny, cheap ESP32 board acts as a remote Bluetooth radio. Put it wherever your
@@ -162,6 +165,17 @@ Discovery handles as many boards as you like at once: claim each one, and from
 then on it shows up on its own when plugged in and its adapter disappears when
 unplugged. Put one bridge in each room, or set `subnet` so the daemon only
 listens for boards on your own network.
+
+### Verifying downloads
+
+Every release ships a `SHA256SUMS` file and a build provenance attestation
+made by GitHub Actions, so you can check that what you downloaded is what CI
+built from the tagged commit:
+
+```sh
+sha256sum -c --ignore-missing SHA256SUMS
+gh attestation verify hcibridge_*_amd64.deb --repo heppu/esp-hci-bridge
+```
 
 ## Security model
 
