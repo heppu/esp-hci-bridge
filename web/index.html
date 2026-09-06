@@ -159,7 +159,7 @@ connect XX:XX:XX:XX:XX:XX</code></pre>
   <p class="lede">The service handles boards coming and going. The few commands you might need later:</p>
   <table>
     <tr><td><code>hcibridge status &lt;ip&gt;</code></td><td>everything a board reports, including traffic and drop counters</td></tr>
-    <tr><td><code>sudo hcibridge update &lt;ip&gt; &lt;file.bin&gt;</code></td><td>new firmware over the network, the board rolls back by itself if it fails</td></tr>
+    <tr><td><code>sudo hcibridge update &lt;ip&gt;</code></td><td>latest release over the network, checksum verified, the board rolls back by itself if it fails</td></tr>
     <tr><td><code>sudo hcibridge revoke &lt;bdaddr&gt;</code></td><td>stop trusting a board</td></tr>
     <tr><td><code>sudo hcibridge unclaim &lt;ip&gt;</code></td><td>release a board so another PC can claim it</td></tr>
   </table>

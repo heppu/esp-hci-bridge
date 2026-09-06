@@ -31,6 +31,7 @@ pub const global_opts = [_]Opt{
 
 const config_opt = Opt{ .long = "--config", .arg = "path", .help = "config file (default /etc/hcibridge/config, plus .d drop-ins)" };
 const discovery_port_opt = Opt{ .long = "--discovery-port", .arg = "n", .help = "UDP discovery port (default 4445)" };
+const board_opt = Opt{ .long = "--board", .arg = "preset", .help = "board preset for the release image, for firmware that does not report it" };
 
 /// Run flags handled by main.zig rather than the settings schema.
 pub const run_extras = [_]Opt{
@@ -81,9 +82,9 @@ pub const commands = [_]Cmd{
     },
     .{
         .name = "update",
-        .summary = "push a firmware image over OTA to one bridge or all (requires keys)",
-        .args = "<ip|all> <file>",
-        .opts = &.{ discovery_port_opt, config_opt },
+        .summary = "update one bridge or all to the latest release, or to a given image (requires keys)",
+        .args = "<ip|all> [file]",
+        .opts = &.{ board_opt, discovery_port_opt, config_opt },
     },
     .{
         .name = "completions",

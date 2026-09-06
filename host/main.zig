@@ -135,13 +135,11 @@ pub fn main(init: std.process.Init) !u8 {
     }
     if (std.mem.eql(u8, cmd, "update")) {
         const target = it.next() orelse {
-            log.err("usage: hcibridge update <ip|all> <file.bin>", .{});
+            log.err("usage: hcibridge update <ip|all> [file.bin] [--board <preset>]", .{});
             return 2;
         };
-        const file = it.next() orelse {
-            log.err("usage: hcibridge update <ip|all> <file.bin>", .{});
-            return 2;
-        };
+        var file: ?[]const u8 = null;
+        var preset: ?[]const u8 = null;
         var dport: u16 = disc.default_port;
         var cfg: []const u8 = cli.default_config;
         while (it.next()) |a| {
@@ -149,9 +147,16 @@ pub fn main(init: std.process.Init) !u8 {
                 dport = try std.fmt.parseInt(u16, it.next() orelse return error.MissingValue, 10);
             } else if (std.mem.eql(u8, a, "--config")) {
                 cfg = it.next() orelse return error.MissingValue;
+            } else if (std.mem.eql(u8, a, "--board")) {
+                preset = it.next() orelse return error.MissingValue;
+            } else if (file == null and !std.mem.startsWith(u8, a, "-")) {
+                file = a;
+            } else {
+                log.err("unknown argument {s}", .{a});
+                return 2;
             }
         }
-        return cli.update(io, gpa, target, file, dport, cfg);
+        return cli.update(io, gpa, target, file, preset, dport, cfg);
     }
     if (!std.mem.eql(u8, cmd, "run")) {
         // Back-compat: `hcibridge --host x ...` with no subcommand.
