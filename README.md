@@ -130,8 +130,6 @@ adapters on boot, restart it on crash, and default to discovery mode. Set
 
 Manual run:
 
-Manual run:
-
 ```
 sudo modprobe hci_vhci
 sudo hcibridged                 # discovery mode, finds all bridges
