@@ -59,7 +59,7 @@ fi
 # shellcheck disable=SC2086
 exec docker run --rm $TTY_ARGS $DEVICE_ARGS \
     --user "$(id -u):$(id -g)" \
-    -e HOME=/tmp \
+    -e HOME=/tmp -e PROJECT_VER \
     -e ZIG=/project/.tools/zig-xtensa/zig \
     -v "$ROOT":/project \
     -w /project/firmware \

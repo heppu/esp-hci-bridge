@@ -1,4 +1,5 @@
 #include "glue.h"
+#include "boottrace.h"
 
 #include <string.h>
 
@@ -248,6 +249,7 @@ static void bt_init(void)
     esp_bt_controller_config_t cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_bt_controller_init(&cfg));
     ESP_ERROR_CHECK(esp_bt_controller_enable(ESP_BT_MODE_BTDM));
+    boottrace_mark(4);
     ESP_ERROR_CHECK(esp_vhci_host_register_callback(&vhci_cb));
 
     uint8_t mac[6];
@@ -341,6 +343,8 @@ static void discovery_task(void *arg)
 
 void app_main(void)
 {
+    boottrace_init();
+    boottrace_mark(1);
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
@@ -349,14 +353,20 @@ void app_main(void)
     ESP_ERROR_CHECK(err);
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
+    boottrace_mark(2);
     auth_init();
+    boottrace_mark(3);
 
+    boottrace_mark(5);
     if (!net_start()) {
         // Entered WiFi setup portal; do not start the bridge until configured.
         return;
     }
     bt_init();
+    boottrace_mark(6);
     bridge_start();
+    boottrace_mark(7);
     ota_init();
+    boottrace_mark(8);
     xTaskCreate(discovery_task, "discovery", 4096, NULL, 4, NULL);
 }
