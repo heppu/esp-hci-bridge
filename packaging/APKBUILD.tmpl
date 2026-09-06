@@ -10,13 +10,9 @@ depends="bluez bluez-openrc"
 makedepends="zig"
 install=""
 subpackages="$pkgname-doc $pkgname-openrc $pkgname-bash-completion $pkgname-zsh-completion $pkgname-fish-completion"
-source="$pkgname-$pkgver.tar.gz::https://github.com/heppu/esp-hci-bridge/archive/refs/tags/v$pkgver.tar.gz
-	hcibridged.initd::https://raw.githubusercontent.com/heppu/esp-hci-bridge/v$pkgver/host/openrc/hcibridged
-	hcibridged.confd::https://raw.githubusercontent.com/heppu/esp-hci-bridge/v$pkgver/host/openrc/hcibridged.confd"
+source="$pkgname-$pkgver.tar.gz::https://github.com/heppu/esp-hci-bridge/archive/refs/tags/v$pkgver.tar.gz"
 builddir="$srcdir/esp-hci-bridge-$pkgver"
-sha512sums="SKIP  $pkgname-$pkgver.tar.gz
-SKIP  hcibridged.initd
-SKIP  hcibridged.confd"
+sha512sums="@SHA512@  $pkgname-$pkgver.tar.gz"
 
 build() {
 	zig build -Doptimize=ReleaseSafe "-Dversion=v$pkgver"
@@ -32,6 +28,6 @@ package() {
 	install -Dm644 "$builddir"/host/config/config "$pkgdir"/etc/hcibridge/config
 	install -Dm644 "$builddir"/host/config/config.d/50-example.conf "$pkgdir"/etc/hcibridge/config.d/50-example.conf
 	install -Dm644 "$builddir"/host/modules-load.conf "$pkgdir"/usr/lib/modules-load.d/hci_vhci.conf
-	install -Dm755 "$srcdir"/hcibridged.initd "$pkgdir"/etc/init.d/hcibridged
-	install -Dm644 "$srcdir"/hcibridged.confd "$pkgdir"/etc/conf.d/hcibridged
+	install -Dm755 "$builddir"/host/openrc/hcibridged "$pkgdir"/etc/init.d/hcibridged
+	install -Dm644 "$builddir"/host/openrc/hcibridged.confd "$pkgdir"/etc/conf.d/hcibridged
 }

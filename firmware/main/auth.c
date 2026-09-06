@@ -7,6 +7,7 @@
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_random.h"
+#include "esp_timer.h"
 #include "lwip/sockets.h"
 #include "mbedtls/ecdh.h"
 #include "mbedtls/ecp.h"
@@ -19,11 +20,15 @@ static const char *TAG = "auth";
 #define PSK_LEN 32
 #define NONCE_LEN 32
 #define MAC_LEN 32
+#define HTTP_NONCE_LEN 20
+#define HANDSHAKE_DEADLINE_US (5 * 1000000LL)
 static const char DOM_CLIENT[] = "esp-hci-client";
 static const char DOM_BOARD[] = "esp-hci-board";
 
 static uint8_t g_psk[PSK_LEN];
 static bool g_claimed = false;
+static uint8_t g_http_rand[16];
+static uint32_t g_http_counter = 0;
 
 static int rng(void *ctx, unsigned char *out, size_t len)
 {
@@ -54,6 +59,7 @@ static bool hmac_parts(const uint8_t *key, size_t klen, const uint8_t *const *pa
 
 bool auth_init(void)
 {
+    esp_fill_random(g_http_rand, sizeof(g_http_rand));
     nvs_handle_t h;
     if (nvs_open("bridge", NVS_READONLY, &h) == ESP_OK) {
         size_t len = PSK_LEN;
@@ -94,10 +100,14 @@ static int unhex(const char *s, size_t n, uint8_t *out)
 
 // --- HCI socket handshake ---------------------------------------------------
 
-static bool recv_exact(int fd, uint8_t *buf, size_t n)
+static bool recv_exact(int fd, uint8_t *buf, size_t n, int64_t deadline_us)
 {
     size_t got = 0;
     while (got < n) {
+        int64_t left = deadline_us - esp_timer_get_time();
+        if (left <= 0) return false;
+        struct timeval tv = { .tv_sec = left / 1000000, .tv_usec = left % 1000000 };
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
         int r = recv(fd, buf + got, n - got, 0);
         if (r <= 0) return false;
         got += (size_t)r;
@@ -105,21 +115,14 @@ static bool recv_exact(int fd, uint8_t *buf, size_t n)
     return true;
 }
 
-bool auth_handshake(int fd)
+static bool handshake_inner(int fd, int64_t deadline_us)
 {
-    if (!g_claimed) {
-        ESP_LOGW(TAG, "refusing HCI connection: board unclaimed");
-        return false;
-    }
-    struct timeval tv = { .tv_sec = 3, .tv_usec = 0 };
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-
     uint8_t sn[NONCE_LEN];
     esp_fill_random(sn, sizeof(sn));
     if (send(fd, sn, sizeof(sn), 0) != (int)sizeof(sn)) return false;
 
     uint8_t msg[NONCE_LEN + MAC_LEN];
-    if (!recv_exact(fd, msg, sizeof(msg))) return false;
+    if (!recv_exact(fd, msg, sizeof(msg), deadline_us)) return false;
     const uint8_t *cn = msg;
     const uint8_t *cmac = msg + NONCE_LEN;
 
@@ -136,18 +139,27 @@ bool auth_handshake(int fd)
     const uint8_t *p2[] = { cn, sn, (const uint8_t *)DOM_BOARD };
     const size_t l2[] = { NONCE_LEN, NONCE_LEN, sizeof(DOM_BOARD) - 1 };
     if (!hmac_parts(g_psk, PSK_LEN, p2, l2, 3, bmac)) return false;
-    if (send(fd, bmac, sizeof(bmac), 0) != (int)sizeof(bmac)) return false;
+    return send(fd, bmac, sizeof(bmac), 0) == (int)sizeof(bmac);
+}
 
-    // Back to blocking for the HCI pump.
-    tv.tv_sec = 0;
+// The whole exchange must finish within one deadline so a peer trickling
+// bytes cannot hold the rx task.
+bool auth_handshake(int fd)
+{
+    if (!g_claimed) {
+        ESP_LOGW(TAG, "refusing HCI connection: board unclaimed");
+        return false;
+    }
+    bool ok = handshake_inner(fd, esp_timer_get_time() + HANDSHAKE_DEADLINE_US);
+    struct timeval tv = { 0 };
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-    return true;
+    return ok;
 }
 
 // --- discovery announce signature -------------------------------------------
 
-// hex of first 16 bytes of HMAC(psk, "bdaddr\tport\tname"), or "-" if unclaimed.
-size_t auth_announce_sig(const char *bdaddr, unsigned port, const char *name, char *out, size_t outlen)
+// hex of first 16 bytes of HMAC(psk, "bdaddr\tport\tname\tip"), or "-" if unclaimed.
+size_t auth_announce_sig(const char *bdaddr, unsigned port, const char *name, const char *ip, char *out, size_t outlen)
 {
     if (!g_claimed || outlen < 33) {
         if (outlen >= 2) { out[0] = '-'; out[1] = '\0'; }
@@ -156,26 +168,70 @@ size_t auth_announce_sig(const char *bdaddr, unsigned port, const char *name, ch
     char ps[8];
     int pn = snprintf(ps, sizeof(ps), "%u", port);
     uint8_t mac[MAC_LEN];
-    const uint8_t *p[] = { (const uint8_t *)bdaddr, (const uint8_t *)"\t", (const uint8_t *)ps, (const uint8_t *)"\t", (const uint8_t *)name };
-    const size_t l[] = { strlen(bdaddr), 1, (size_t)pn, 1, strlen(name) };
-    if (!hmac_parts(g_psk, PSK_LEN, p, l, 5, mac)) { out[0] = '-'; out[1] = '\0'; return 1; }
+    const uint8_t *p[] = { (const uint8_t *)bdaddr, (const uint8_t *)"\t", (const uint8_t *)ps, (const uint8_t *)"\t", (const uint8_t *)name, (const uint8_t *)"\t", (const uint8_t *)ip };
+    const size_t l[] = { strlen(bdaddr), 1, (size_t)pn, 1, strlen(name), 1, strlen(ip) };
+    if (!hmac_parts(g_psk, PSK_LEN, p, l, 7, mac)) { out[0] = '-'; out[1] = '\0'; return 1; }
     hexlify(mac, 16, out);
     return 32;
 }
 
 // --- HTTP request auth --------------------------------------------------------
 
-// header_hex must equal hex(HMAC(psk, "<METHOD> <path>\n" || body_sha256)).
-bool auth_check_http(const char *method, const char *path, const uint8_t body_sha[32], const char *header_hex)
+static void http_nonce(uint8_t out[HTTP_NONCE_LEN])
 {
-    if (!g_claimed || !header_hex || strlen(header_hex) != 64) return false;
+    memcpy(out, g_http_rand, 16);
+    out[16] = (uint8_t)(g_http_counter >> 24);
+    out[17] = (uint8_t)(g_http_counter >> 16);
+    out[18] = (uint8_t)(g_http_counter >> 8);
+    out[19] = (uint8_t)g_http_counter;
+}
+
+size_t auth_nonce_hex(char *out, size_t outlen)
+{
+    if (outlen < 2 * HTTP_NONCE_LEN + 1) {
+        if (outlen) out[0] = '\0';
+        return 0;
+    }
+    uint8_t n[HTTP_NONCE_LEN];
+    http_nonce(n);
+    hexlify(n, sizeof(n), out);
+    return 2 * HTTP_NONCE_LEN;
+}
+
+void auth_nonce_bump(void)
+{
+    g_http_counter++;
+}
+
+static bool check_mac(const char *header_hex, const uint8_t *const *parts, const size_t *lens, int n)
+{
+    if (!g_claimed || !header_hex || strlen(header_hex) != 2 * MAC_LEN) return false;
     uint8_t given[MAC_LEN];
     if (unhex(header_hex, MAC_LEN, given) != 0) return false;
     uint8_t mac[MAC_LEN];
-    const uint8_t *p[] = { (const uint8_t *)method, (const uint8_t *)" ", (const uint8_t *)path, (const uint8_t *)"\n", body_sha };
-    const size_t l[] = { strlen(method), 1, strlen(path), 1, 32 };
-    if (!hmac_parts(g_psk, PSK_LEN, p, l, 5, mac)) return false;
+    if (!hmac_parts(g_psk, PSK_LEN, parts, lens, n, mac)) return false;
     return auth_ct_equal(given, mac, MAC_LEN);
+}
+
+// header_hex must equal hex(HMAC(psk, "<METHOD> <path>\n" || nonce || body_sha256)).
+bool auth_check_http(const char *method, const char *path, const uint8_t body_sha[32], const char *header_hex)
+{
+    uint8_t nonce[HTTP_NONCE_LEN];
+    http_nonce(nonce);
+    const uint8_t *p[] = { (const uint8_t *)method, (const uint8_t *)" ", (const uint8_t *)path, (const uint8_t *)"\n", nonce, body_sha };
+    const size_t l[] = { strlen(method), 1, strlen(path), 1, sizeof(nonce), 32 };
+    return check_mac(header_hex, p, l, 6);
+}
+
+// header_hex must equal hex(HMAC(psk, "PRE <METHOD> <path>\n" || nonce || be32(content_len))).
+bool auth_check_http_pre(const char *method, const char *path, uint32_t content_len, const char *header_hex)
+{
+    uint8_t nonce[HTTP_NONCE_LEN];
+    http_nonce(nonce);
+    uint8_t len_be[4] = { (uint8_t)(content_len >> 24), (uint8_t)(content_len >> 16), (uint8_t)(content_len >> 8), (uint8_t)content_len };
+    const uint8_t *p[] = { (const uint8_t *)"PRE ", (const uint8_t *)method, (const uint8_t *)" ", (const uint8_t *)path, (const uint8_t *)"\n", nonce, len_be };
+    const size_t l[] = { 4, strlen(method), 1, strlen(path), 1, sizeof(nonce), 4 };
+    return check_mac(header_hex, p, l, 7);
 }
 
 // --- claim: X25519, psk = SHA256(shared) --------------------------------------

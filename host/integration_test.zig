@@ -114,3 +114,81 @@ test "unclaimed sim refuses HCI connections" {
     tcp.close(io);
     try testing.expect(sim_future.await(io) != null);
 }
+
+fn runSilentPeer(io: Io, server: *Io.net.Server) void {
+    var stream = server.accept(io) catch return;
+    defer stream.close(io);
+    var buf: [16]u8 = undefined;
+    var r = stream.reader(io, &.{});
+    var vec = [_][]u8{&buf};
+    while (r.interface.readVec(&vec)) |_| {} else |_| {}
+}
+
+test "handshake gives up on a peer that never writes" {
+    const io = testing.io;
+    const listen_addr: Io.net.IpAddress = .{ .ip4 = .loopback(0) };
+    var server = try listen_addr.listen(io, .{ .reuse_address = true });
+    defer server.deinit(io);
+    var peer = try io.concurrent(runSilentPeer, .{ io, &server });
+
+    const tcp = try server.socket.address.connect(io, .{ .mode = .stream });
+    const psk: auth.Psk = [_]u8{4} ** 32;
+    const start = Io.Clock.Timestamp.now(io, .awake);
+    try testing.expectError(error.HandshakeTimeout, handshake.clientWith(io, tcp, &psk, .{ .timeout = .fromMilliseconds(200) }));
+    const elapsed_ms = start.untilNow(io).raw.toMilliseconds();
+    try testing.expect(elapsed_ms >= 150 and elapsed_ms < 1000);
+    tcp.close(io);
+    peer.await(io);
+}
+
+test "board sending a bad proof is AuthFailed, not a dead socket" {
+    const io = testing.io;
+    const listen_addr: Io.net.IpAddress = .{ .ip4 = .loopback(0) };
+    var server = try listen_addr.listen(io, .{ .reuse_address = true });
+    defer server.deinit(io);
+    const psk: auth.Psk = [_]u8{5} ** 32;
+    var ctrl: sim.Controller = .{ .psk = psk, .bad_mac = true };
+    var sim_future = try io.concurrent(runSimOnce, .{ io, &server, &ctrl });
+
+    const tcp = try server.socket.address.connect(io, .{ .mode = .stream });
+    try testing.expectError(error.AuthFailed, handshake.client(io, tcp, &psk));
+    tcp.close(io);
+    _ = sim_future.await(io);
+}
+
+fn runBoardThatHangsUp(io: Io, server: *Io.net.Server, psk: *const auth.Psk) void {
+    var stream = server.accept(io) catch return;
+    defer stream.close(io);
+    handshake.board(io, stream, psk) catch {};
+}
+
+test "session ends promptly when the board closes first" {
+    const io = testing.io;
+    const listen_addr: Io.net.IpAddress = .{ .ip4 = .loopback(0) };
+    var server = try listen_addr.listen(io, .{ .reuse_address = true });
+    defer server.deinit(io);
+    const psk: auth.Psk = [_]u8{6} ** 32;
+    var peer = try io.concurrent(runBoardThatHangsUp, .{ io, &server, &psk });
+
+    const tcp = try server.socket.address.connect(io, .{ .mode = .stream });
+    try session.tuneSocket(tcp.socket.handle);
+    try handshake.client(io, tcp, &psk);
+
+    var fds: [2]i32 = undefined;
+    const rc = std.os.linux.socketpair(std.os.linux.AF.UNIX, std.os.linux.SOCK.SEQPACKET | std.os.linux.SOCK.CLOEXEC, 0, &fds);
+    if (std.posix.errno(rc) != .SUCCESS) return error.SocketPairFailed;
+    const dummy: Io.net.IpAddress = .{ .ip4 = .loopback(0) };
+    const local: Io.net.Stream = .{ .socket = .{ .handle = fds[0], .address = dummy } };
+    const fake_host: Io.net.Stream = .{ .socket = .{ .handle = fds[1], .address = dummy } };
+    defer local.close(io);
+    defer fake_host.close(io);
+
+    var s = session.Session.init(io, tcp, .{ .socket = local });
+    const start = Io.Clock.Timestamp.now(io, .awake);
+    const stats = try s.run();
+    const elapsed_ms = start.untilNow(io).raw.toMilliseconds();
+    try testing.expect(elapsed_ms < 1000);
+    try testing.expectEqual(@as(u64, 0), stats.to_controller);
+    tcp.close(io);
+    peer.await(io);
+}
