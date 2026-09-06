@@ -79,17 +79,56 @@ sudo rc-update add hcibridged default
 sudo rc-service hcibridged start
 ```
 
-Install as a boot service (OpenRC):
+Install as a boot service:
 
 ```
 doas scripts/install-host-service.sh
 ```
 
-This builds the release binary, installs it to `/usr/local/bin`, adds the
-service, loads `hci_vhci` at boot, and starts it. The service orders itself
-before `bluetooth` so bluez sees the controller on boot, and supervises the
-daemon so it restarts on crash. Edit the board address in
-`/etc/conf.d/hcibridged`.
+The installer builds the binary to `/usr/local/bin/hcibridge`, loads `hci_vhci`
+at boot, detects your init system (systemd, OpenRC, runit or s6) and installs
+the matching unit in discovery mode. Ready-made files live under `host/` if you
+prefer to install by hand:
+
+**systemd**
+
+```
+install -m755 zig-out/bin/hcibridge /usr/local/bin/hcibridge
+install -m644 host/systemd/hcibridge.service /etc/systemd/system/
+install -m644 host/systemd/hcibridge.env /etc/default/hcibridge
+echo hci_vhci > /etc/modules-load.d/hci_vhci.conf
+systemctl daemon-reload && systemctl enable --now hcibridge
+```
+
+**OpenRC**
+
+```
+install -m755 host/openrc/hcibridged /etc/init.d/hcibridged
+install -m644 host/openrc/hcibridged.confd /etc/conf.d/hcibridged
+rc-update add hcibridged default && rc-service hcibridged start
+```
+
+**runit**
+
+```
+install -m644 host/hcibridge.conf /etc/hcibridge.conf
+cp -r host/runit/hcibridge /etc/sv/hcibridge
+ln -s /etc/sv/hcibridge /var/service/     # or your runsvdir scan dir
+```
+
+**s6**
+
+```
+install -m644 host/hcibridge.conf /etc/hcibridge.conf
+cp -r host/s6/hcibridge /etc/s6/sv/hcibridge   # add to your s6-rc db, then reload
+```
+
+All of these order the daemon before the Bluetooth service so bluez sees the
+adapters on boot, restart it on crash, and default to discovery mode. Set
+`BRIDGE_ARGS="--host <ip>"` (systemd: `/etc/default/hcibridge`, OpenRC:
+`/etc/conf.d/hcibridged`, runit/s6: `/etc/hcibridge.conf`) to pin one board.
+
+Manual run:
 
 Manual run:
 

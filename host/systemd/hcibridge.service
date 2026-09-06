@@ -1,0 +1,18 @@
+[Unit]
+Description=ESP HCI bridge daemon
+Documentation=https://github.com/heppu/esp-hci-bridge
+Wants=network-online.target
+After=network-online.target
+# Start before bluetooth so bluez sees the vhci adapters on boot.
+Before=bluetooth.service
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/default/hcibridge
+ExecStartPre=-/sbin/modprobe hci_vhci
+ExecStart=/usr/local/bin/hcibridge run $BRIDGE_ARGS
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
