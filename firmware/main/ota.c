@@ -34,12 +34,12 @@ static esp_err_t status_get(httpd_req_t *req)
     char nonce[41];
     auth_nonce_hex(nonce, sizeof(nonce));
 
-    char body[576];
+    char body[704];
     int n = snprintf(body, sizeof(body),
-                     "{\"version\":\"%s\",\"idf\":\"%s\",\"partition\":\"%s\","
+                     "{\"version\":\"%s\",\"board\":\"%s\",\"idf\":\"%s\",\"partition\":\"%s\","
                      "\"bdaddr\":\"%02x:%02x:%02x:%02x:%02x:%02x\",\"claimed\":%s,\"nonce\":\"%s\",\"uptime_s\":%lld,"
                      "\"prev_stage\":%lu,\"reset\":%d,\"free_heap\":%lu,\"stats\":%s}\n",
-                     app->version, app->idf_ver, running ? running->label : "?",
+                     app->version, CONFIG_BRIDGE_BOARD_ID, app->idf_ver, running ? running->label : "?",
                      mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
                      auth_claimed() ? "true" : "false", nonce,
                      (long long)(esp_timer_get_time() / 1000000),
