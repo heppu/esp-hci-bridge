@@ -9,6 +9,7 @@
 #include "esp_ota_ops.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include "mbedtls/sha256.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -27,18 +28,37 @@ static esp_err_t status_get(httpd_req_t *req)
     char body[512];
     int n = snprintf(body, sizeof(body),
                      "{\"version\":\"%s\",\"idf\":\"%s\",\"partition\":\"%s\","
-                     "\"bdaddr\":\"%02x:%02x:%02x:%02x:%02x:%02x\",\"uptime_s\":%lld,"
+                     "\"bdaddr\":\"%02x:%02x:%02x:%02x:%02x:%02x\",\"claimed\":%s,\"uptime_s\":%lld,"
                      "\"free_heap\":%lu,\"stats\":%s}\n",
                      app->version, app->idf_ver, running ? running->label : "?",
                      mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
+                     auth_claimed() ? "true" : "false",
                      (long long)(esp_timer_get_time() / 1000000),
                      (unsigned long)esp_get_free_heap_size(), stats);
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, body, n);
 }
 
+// Pulls the X-Bridge-Auth header (64 hex chars) or returns false.
+static bool get_auth_header(httpd_req_t *req, char *out, size_t outlen)
+{
+    size_t n = httpd_req_get_hdr_value_len(req, "X-Bridge-Auth");
+    if (n == 0 || n + 1 > outlen) return false;
+    return httpd_req_get_hdr_value_str(req, "X-Bridge-Auth", out, outlen) == ESP_OK;
+}
+
 static esp_err_t ota_post(httpd_req_t *req)
 {
+    // The body is hashed while it streams to flash; the proof is checked
+    // before the new slot is ever selected for boot.
+    char hdr[80];
+    if (!auth_claimed() || !get_auth_header(req, hdr, sizeof(hdr))) {
+        httpd_resp_send_err(req, HTTPD_401_UNAUTHORIZED, "X-Bridge-Auth required (claim the board first)");
+        return ESP_FAIL;
+    }
+    mbedtls_sha256_context sha;
+    mbedtls_sha256_init(&sha);
+    mbedtls_sha256_starts(&sha, 0);
     const esp_partition_t *part = esp_ota_get_next_update_partition(NULL);
     if (!part) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "no ota partition");
@@ -62,16 +82,29 @@ static esp_err_t ota_post(httpd_req_t *req)
         }
         if (n <= 0) {
             esp_ota_abort(handle);
+            mbedtls_sha256_free(&sha);
             httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "upload interrupted");
             return ESP_FAIL;
         }
+        mbedtls_sha256_update(&sha, (const unsigned char *)buf, n);
         err = esp_ota_write(handle, buf, n);
         if (err != ESP_OK) {
             esp_ota_abort(handle);
+            mbedtls_sha256_free(&sha);
             httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, esp_err_to_name(err));
             return ESP_FAIL;
         }
         remaining -= n;
+    }
+
+    uint8_t digest[32];
+    mbedtls_sha256_finish(&sha, digest);
+    mbedtls_sha256_free(&sha);
+    if (!auth_check_http("POST", "/ota", digest, hdr)) {
+        esp_ota_abort(handle);
+        ESP_LOGW(TAG, "rejected OTA: bad auth");
+        httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "bad X-Bridge-Auth");
+        return ESP_FAIL;
     }
 
     err = esp_ota_end(handle);
@@ -94,11 +127,53 @@ static esp_err_t ota_post(httpd_req_t *req)
 
 static esp_err_t reboot_post(httpd_req_t *req)
 {
+    char hdr[80];
+    uint8_t empty_sha[32];
+    mbedtls_sha256((const unsigned char *)"", 0, empty_sha, 0);
+    if (!auth_claimed() || !get_auth_header(req, hdr, sizeof(hdr)) || !auth_check_http("POST", "/reboot", empty_sha, hdr)) {
+        httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "bad or missing X-Bridge-Auth");
+        return ESP_FAIL;
+    }
     httpd_resp_sendstr(req, "rebooting\n");
     ESP_LOGI(TAG, "reboot requested");
     vTaskDelay(pdMS_TO_TICKS(300));
     esp_restart();
     return ESP_OK;
+}
+
+// POST /claim, body = 64 hex chars (client X25519 public key). Only while
+// unclaimed. Replies with the board's public key; both sides derive the PSK.
+static esp_err_t claim_post(httpd_req_t *req)
+{
+    if (auth_claimed()) {
+        httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "already claimed; factory-reset to re-key");
+        return ESP_FAIL;
+    }
+    char body[80];
+    int n = httpd_req_recv(req, body, sizeof(body) - 1);
+    if (n < 64) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "expected 64 hex chars");
+        return ESP_FAIL;
+    }
+    body[64] = '\0';
+    uint8_t peer[32], ours[32];
+    for (int i = 0; i < 32; i++) {
+        unsigned v;
+        if (sscanf(body + 2 * i, "%2x", &v) != 1) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad hex");
+            return ESP_FAIL;
+        }
+        peer[i] = (uint8_t)v;
+    }
+    if (auth_claim(peer, ours) != 0) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "claim failed");
+        return ESP_FAIL;
+    }
+    char out[66];
+    static const char hx[] = "0123456789abcdef";
+    for (int i = 0; i < 32; i++) { out[2 * i] = hx[ours[i] >> 4]; out[2 * i + 1] = hx[ours[i] & 15]; }
+    out[64] = '\n'; out[65] = '\0';
+    return httpd_resp_send(req, out, 65);
 }
 
 void ota_init(void)
@@ -113,9 +188,11 @@ void ota_init(void)
     const httpd_uri_t status_uri = { .uri = "/", .method = HTTP_GET, .handler = status_get };
     const httpd_uri_t ota_uri = { .uri = "/ota", .method = HTTP_POST, .handler = ota_post };
     const httpd_uri_t reboot_uri = { .uri = "/reboot", .method = HTTP_POST, .handler = reboot_post };
+    const httpd_uri_t claim_uri = { .uri = "/claim", .method = HTTP_POST, .handler = claim_post };
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &status_uri));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &ota_uri));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &reboot_uri));
+    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &claim_uri));
     ESP_LOGI(TAG, "http status on /, updates via POST /ota");
 }
 

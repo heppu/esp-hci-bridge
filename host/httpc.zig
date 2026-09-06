@@ -72,24 +72,48 @@ fn readResponse(io: Io, stream: Io.net.Stream, gpa: std.mem.Allocator) !Response
 }
 
 pub fn get(io: Io, gpa: std.mem.Allocator, addr: *const Io.net.IpAddress, path: []const u8) !Response {
+    return getH(io, gpa, addr, path, null);
+}
+
+/// GET with an optional extra header line (without CRLF), e.g. "X-Bridge-Auth: ...".
+pub fn getH(io: Io, gpa: std.mem.Allocator, addr: *const Io.net.IpAddress, path: []const u8, extra: ?[]const u8) !Response {
     var stream = try addr.connect(io, .{ .mode = .stream });
     defer stream.close(io);
     var wbuf: [512]u8 = undefined;
     var w = stream.writer(io, &wbuf);
-    try w.interface.print("GET {s} HTTP/1.1\r\nHost: bridge\r\nConnection: close\r\n\r\n", .{path});
+    try w.interface.print("GET {s} HTTP/1.1\r\nHost: bridge\r\nConnection: close\r\n", .{path});
+    if (extra) |h| try w.interface.print("{s}\r\n", .{h});
+    try w.interface.writeAll("\r\n");
     try w.interface.flush();
     return readResponse(io, stream, gpa);
 }
 
 pub fn postBinary(io: Io, gpa: std.mem.Allocator, addr: *const Io.net.IpAddress, path: []const u8, body: []const u8) !Response {
+    return postH(io, gpa, addr, path, body, null);
+}
+
+/// POST with an optional extra header line (without CRLF).
+pub fn postH(io: Io, gpa: std.mem.Allocator, addr: *const Io.net.IpAddress, path: []const u8, body: []const u8, extra: ?[]const u8) !Response {
     var stream = try addr.connect(io, .{ .mode = .stream });
     defer stream.close(io);
     var wbuf: [4096]u8 = undefined;
     var w = stream.writer(io, &wbuf);
-    try w.interface.print("POST {s} HTTP/1.1\r\nHost: bridge\r\nContent-Type: application/octet-stream\r\nContent-Length: {d}\r\nConnection: close\r\n\r\n", .{ path, body.len });
+    try w.interface.print("POST {s} HTTP/1.1\r\nHost: bridge\r\nContent-Type: application/octet-stream\r\nContent-Length: {d}\r\nConnection: close\r\n", .{ path, body.len });
+    if (extra) |h| try w.interface.print("{s}\r\n", .{h});
+    try w.interface.writeAll("\r\n");
     try w.interface.writeAll(body);
     try w.interface.flush();
     return readResponse(io, stream, gpa);
+}
+
+/// True if the flat JSON has `"key":true`.
+pub fn jsonBool(body: []const u8, key: []const u8) ?bool {
+    var pat: [64]u8 = undefined;
+    const t = std.fmt.bufPrint(&pat, "\"{s}\":true", .{key}) catch return null;
+    if (std.mem.indexOf(u8, body, t) != null) return true;
+    const f = std.fmt.bufPrint(&pat, "\"{s}\":false", .{key}) catch return null;
+    if (std.mem.indexOf(u8, body, f) != null) return false;
+    return null;
 }
 
 /// Pulls one string field out of the flat status JSON, e.g. "version".

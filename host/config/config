@@ -4,7 +4,7 @@
 # Precedence (highest first):  flag  >  env  >  this file (+ .d)  >  default
 #
 # Drop-in fragments in /etc/hcibridge/config.d/*.conf are merged on top of this
-# file, sorted by name. Scalars are last-wins; lists (client/allow/deny) add up.
+# file, sorted by name. Scalars are last-wins, lists (client/allow/deny/psk) add up.
 #
 # Format: key = value   ('#' or ';' begins a comment)
 
@@ -38,3 +38,8 @@
 
 # Never attach these boards (deny wins).      env HCIBRIDGE_DENY
 # deny = aa:bb:cc:dd:ee:ff
+
+# Board keys. 'hcibridge claim <ip>' pairs a board with this PC and writes one
+# of these to config.d/board-<bdaddr>.conf. A board without a key here is
+# never attached. env HCIBRIDGE_PSK (comma-separated)
+# psk = a0:a3:b3:2f:61:1e=0123...cdef

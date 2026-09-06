@@ -8,6 +8,7 @@
 
 const std = @import("std");
 const config = @import("config.zig");
+const auth = @import("auth");
 
 const log = std.log.scoped(.settings);
 
@@ -36,6 +37,7 @@ pub const descs = [_]Desc{
     .{ .field = "clients", .flag = "--client", .env = "HCIBRIDGE_CLIENTS", .key = "client", .kind = .list, .arg = "ip", .help = "static ESP board to attach (repeatable); disables the need for discovery" },
     .{ .field = "allow", .flag = "--allow", .env = "HCIBRIDGE_ALLOW", .key = "allow", .kind = .list, .arg = "bdaddr", .help = "only attach boards with these Bluetooth addresses (repeatable)" },
     .{ .field = "deny", .flag = "--deny", .env = "HCIBRIDGE_DENY", .key = "deny", .kind = .list, .arg = "bdaddr", .help = "never attach boards with these Bluetooth addresses (repeatable)" },
+    .{ .field = "psk", .flag = "--psk", .env = "HCIBRIDGE_PSK", .key = "psk", .kind = .list, .arg = "bdaddr=hex", .help = "board key from 'hcibridge claim' (repeatable); only keyed boards are attached" },
 };
 
 pub const Settings = struct {
@@ -50,12 +52,23 @@ pub const Settings = struct {
     clients: []const []const u8 = &.{},
     allow: []const []const u8 = &.{},
     deny: []const []const u8 = &.{},
+    psk: []const []const u8 = &.{},
     once: bool = false,
 
     pub fn deinit(self: *Settings) void {
         self.arena.deinit();
     }
 };
+
+/// Finds the PSK for a board among "bdaddr=hex" entries (bdaddr case-insensitive).
+pub fn lookupPsk(entries: []const []const u8, bdaddr: []const u8) ?auth.Psk {
+    for (entries) |e| {
+        const eq = std.mem.indexOfScalar(u8, e, '=') orelse continue;
+        if (!std.ascii.eqlIgnoreCase(std.mem.trim(u8, e[0..eq], " "), bdaddr)) continue;
+        return auth.hexToPsk(std.mem.trim(u8, e[eq + 1 ..], " "));
+    }
+    return null;
+}
 
 pub const EnvGet = *const fn (ctx: ?*anyopaque, name: []const u8) ?[]const u8;
 
@@ -158,6 +171,7 @@ pub fn resolve(
     var clients: std.ArrayList([]const u8) = .empty;
     var allow: std.ArrayList([]const u8) = .empty;
     var deny: std.ArrayList([]const u8) = .empty;
+    var psk: std.ArrayList([]const u8) = .empty;
 
     for (layered.items) |p| {
         if (std.mem.eql(u8, p.key, "discovery")) {
@@ -180,11 +194,14 @@ pub fn resolve(
             try allow.append(a, try a.dupe(u8, p.value));
         } else if (std.mem.eql(u8, p.key, "deny")) {
             try deny.append(a, try a.dupe(u8, p.value));
+        } else if (std.mem.eql(u8, p.key, "psk")) {
+            try psk.append(a, try a.dupe(u8, p.value));
         }
     }
     s.clients = try clients.toOwnedSlice(a);
     s.allow = try allow.toOwnedSlice(a);
     s.deny = try deny.toOwnedSlice(a);
+    s.psk = try psk.toOwnedSlice(a);
     return s;
 }
 
@@ -269,4 +286,11 @@ test "boolean explicit value" {
     var s = try resolve(testing.allocator, &.{}, &.{ "--discovery", "off" }, null, null);
     defer s.deinit();
     try testing.expect(!s.discovery);
+}
+
+test "lookupPsk matches case-insensitively and parses hex" {
+    const entries = [_][]const u8{ "AA:BB:CC:DD:EE:01=" ++ ("ab" ** 32), "junk" };
+    const p = lookupPsk(&entries, "aa:bb:cc:dd:ee:01").?;
+    try testing.expectEqual(@as(u8, 0xab), p[0]);
+    try testing.expect(lookupPsk(&entries, "aa:bb:cc:dd:ee:02") == null);
 }

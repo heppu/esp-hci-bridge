@@ -6,12 +6,16 @@ const std = @import("std");
 const Io = std.Io;
 const h4 = @import("h4");
 const disc = @import("discovery");
+const auth = @import("auth");
+const handshake = @import("handshake.zig");
 
 const log = std.log.scoped(.sim);
 
 pub const Controller = struct {
     bdaddr: [6]u8 = .{ 0xe5, 0x02, 0x00, 0xbe, 0xef, 0x01 },
     commands: u64 = 0,
+    /// Board key. Null means unclaimed: HCI connections are refused, like the firmware.
+    psk: ?auth.Psk = null,
 
     const Opcode = struct {
         const reset: u16 = 0x0c03;
@@ -118,6 +122,11 @@ pub const Controller = struct {
 };
 
 pub fn serve(io: Io, stream: Io.net.Stream, ctrl: *Controller) !void {
+    const psk = ctrl.psk orelse {
+        log.warn("unclaimed: refusing HCI connection", .{});
+        return error.Unclaimed;
+    };
+    try handshake.board(io, stream, &psk);
     var read_buf: [4096]u8 = undefined;
     var write_buf: [4096]u8 = undefined;
     var storage: [h4.max_packet_len]u8 = undefined;
@@ -154,6 +163,7 @@ const AnnounceCfg = struct {
     bdaddr: []const u8,
     name: []const u8,
     disc_port: u16,
+    psk: ?auth.Psk,
 };
 
 fn announceLoop(cfg: AnnounceCfg) void {
@@ -163,7 +173,9 @@ fn announceLoop(cfg: AnnounceCfg) void {
     };
     defer sock.close(cfg.io);
     var buf: [disc.max_datagram]u8 = undefined;
-    const msg = disc.buildAnnounce(&buf, cfg.bdaddr, cfg.tcp_port, cfg.name) catch return;
+    var sigbuf: [auth.announce_sig_hex_len]u8 = undefined;
+    const sig: []const u8 = if (cfg.psk) |*p| auth.announceSig(p, cfg.bdaddr, cfg.tcp_port, cfg.name, &sigbuf) else "-";
+    const msg = disc.buildAnnounce(&buf, cfg.bdaddr, cfg.tcp_port, cfg.name, sig) catch return;
     while (true) {
         sock.send(cfg.io, &cfg.to, msg) catch |err| log.debug("announce send: {s}", .{@errorName(err)});
         cfg.io.sleep(Io.Duration.fromMilliseconds(2000), .awake) catch {};
@@ -177,6 +189,7 @@ pub fn main(init: std.process.Init) !void {
     var name: []const u8 = "esp-hci-sim";
     var announce_to: ?[]const u8 = null;
     var disc_port: u16 = disc.default_port;
+    var psk: ?auth.Psk = null;
     var it = init.minimal.args.iterate();
     _ = it.next();
     while (it.next()) |arg| {
@@ -190,8 +203,10 @@ pub fn main(init: std.process.Init) !void {
             announce_to = it.next() orelse return error.MissingValue;
         } else if (std.mem.eql(u8, arg, "--discovery-port")) {
             disc_port = try std.fmt.parseInt(u16, it.next() orelse return error.MissingValue, 10);
+        } else if (std.mem.eql(u8, arg, "--psk")) {
+            psk = auth.hexToPsk(it.next() orelse return error.MissingValue) orelse return error.BadPsk;
         } else {
-            log.err("usage: hcibridge-sim [--port n] [--bdaddr x] [--name x] [--announce-to ip:port] [--discovery-port n]", .{});
+            log.err("usage: hcibridge-sim [--port n] [--bdaddr x] [--name x] [--announce-to ip:port] [--discovery-port n] [--psk hex]", .{});
             return error.BadArgument;
         }
     }
@@ -219,10 +234,11 @@ pub fn main(init: std.process.Init) !void {
         .bdaddr = bdaddr,
         .name = name,
         .disc_port = disc_port,
+        .psk = psk,
     }});
     defer _ = announce.cancel(io);
 
-    var ctrl: Controller = .{};
+    var ctrl: Controller = .{ .psk = psk };
     while (true) {
         var stream = try server.accept(io);
         defer stream.close(io);

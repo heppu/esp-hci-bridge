@@ -213,6 +213,11 @@ void glue_wdt_feed(void)
 // Bluetooth controller
 // ---------------------------------------------------------------------------
 
+bool glue_auth_handshake(int fd)
+{
+    return auth_handshake(fd);
+}
+
 bool glue_bt_send_available(void)
 {
     return esp_vhci_host_check_send_available();
@@ -258,11 +263,10 @@ static void discovery_task(void *arg)
     (void)arg;
     uint8_t mac[6] = {0};
     esp_read_mac(mac, ESP_MAC_BT);
-    char announce[192];
-    int alen = snprintf(announce, sizeof(announce),
-                        "ESPHCI1\tANNOUNCE\t%02x:%02x:%02x:%02x:%02x:%02x\t%u\t%s\n",
-                        mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
-                        (unsigned)CONFIG_BRIDGE_TCP_PORT, CONFIG_BRIDGE_HOSTNAME);
+    char bdaddr[18];
+    snprintf(bdaddr, sizeof(bdaddr), "%02x:%02x:%02x:%02x:%02x:%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    char announce[224];
+    int alen = 0;
 
     int fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (fd < 0) {
@@ -293,6 +297,11 @@ static void discovery_task(void *arg)
 
     ESP_LOGI(TAG, "discovery announcing on udp %d", DISCOVERY_PORT);
     while (1) {
+        // Signed with the board key once claimed, so the host can drop spoofed announces.
+        char sig[40];
+        auth_announce_sig(bdaddr, (unsigned)CONFIG_BRIDGE_TCP_PORT, CONFIG_BRIDGE_HOSTNAME, sig, sizeof(sig));
+        alen = snprintf(announce, sizeof(announce), "ESPHCI1\tANNOUNCE\t%s\t%u\t%s\t%s\n",
+                        bdaddr, (unsigned)CONFIG_BRIDGE_TCP_PORT, CONFIG_BRIDGE_HOSTNAME, sig);
         sendto(fd, announce, alen, 0, (struct sockaddr *)&bcast, sizeof(bcast));
 
         // Drain any probes that arrived during the 2s window, reply to each.
@@ -319,6 +328,7 @@ void app_main(void)
     ESP_ERROR_CHECK(err);
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
+    auth_init();
 
     if (!net_start()) {
         // Entered WiFi setup portal; do not start the bridge until configured.

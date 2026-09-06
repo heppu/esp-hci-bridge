@@ -9,3 +9,4 @@ firmware/managed_components/
 firmware/dependencies.lock
 _site/
 dist/
+firmware/secure_boot_signing_key.pem

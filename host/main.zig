@@ -17,6 +17,7 @@ const disc = @import("discovery");
 const spec = @import("spec.zig");
 const config = @import("config.zig");
 const settings = @import("settings.zig");
+const auth = @import("auth");
 
 const log = std.log;
 
@@ -81,6 +82,28 @@ pub fn main(init: std.process.Init) !u8 {
         };
         return cli.list(io, gpa, dport, 2500);
     }
+    if (std.mem.eql(u8, cmd, "claim")) {
+        const ip = it.next() orelse {
+            log.err("usage: hcibridge claim <ip> [--config <path>]", .{});
+            return 2;
+        };
+        var cfg: []const u8 = cli.default_config;
+        while (it.next()) |a| if (std.mem.eql(u8, a, "--config")) {
+            cfg = it.next() orelse return error.MissingValue;
+        };
+        return cli.claim(io, gpa, ip, cfg);
+    }
+    if (std.mem.eql(u8, cmd, "reboot")) {
+        const ip = it.next() orelse {
+            log.err("usage: hcibridge reboot <ip> [--config <path>]", .{});
+            return 2;
+        };
+        var cfg: []const u8 = cli.default_config;
+        while (it.next()) |a| if (std.mem.eql(u8, a, "--config")) {
+            cfg = it.next() orelse return error.MissingValue;
+        };
+        return cli.reboot(io, gpa, ip, cfg);
+    }
     if (std.mem.eql(u8, cmd, "status")) {
         const ip = it.next() orelse {
             log.err("usage: hcibridge status <ip>", .{});
@@ -98,10 +121,15 @@ pub fn main(init: std.process.Init) !u8 {
             return 2;
         };
         var dport: u16 = disc.default_port;
-        while (it.next()) |a| if (std.mem.eql(u8, a, "--discovery-port")) {
-            dport = try std.fmt.parseInt(u16, it.next() orelse return error.MissingValue, 10);
-        };
-        return cli.update(io, gpa, target, file, dport);
+        var cfg: []const u8 = cli.default_config;
+        while (it.next()) |a| {
+            if (std.mem.eql(u8, a, "--discovery-port")) {
+                dport = try std.fmt.parseInt(u16, it.next() orelse return error.MissingValue, 10);
+            } else if (std.mem.eql(u8, a, "--config")) {
+                cfg = it.next() orelse return error.MissingValue;
+            }
+        }
+        return cli.update(io, gpa, target, file, dport, cfg);
     }
     if (!std.mem.eql(u8, cmd, "run")) {
         // Back-compat: `hcibridge --host x ...` with no subcommand.
@@ -135,6 +163,7 @@ const ClientCtx = struct {
     port: u16,
     vhci: []const u8,
     reconnect_ms: u32,
+    psk: auth.Psk,
 };
 
 fn clientThread(ctx: *ClientCtx) void {
@@ -144,7 +173,7 @@ fn clientThread(ctx: *ClientCtx) void {
             ctx.io.sleep(Io.Duration.fromMilliseconds(ctx.reconnect_ms), .awake) catch {};
             continue;
         };
-        _ = board.run(ctx.io, &addr, ctx.vhci, ctx.host) catch |err| {
+        _ = board.run(ctx.io, &addr, ctx.vhci, ctx.host, &ctx.psk) catch |err| {
             log.warn("[{s}] session ended: {s}", .{ ctx.host, @errorName(err) });
         };
         ctx.io.sleep(Io.Duration.fromMilliseconds(ctx.reconnect_ms), .awake) catch {};
@@ -200,15 +229,22 @@ fn runMode(io: Io, gpa: std.mem.Allocator, args: []const []const u8, env_map: *s
         return 2;
     }
 
-    // Pinned client boards each get their own reconnecting thread.
+    // Pinned client boards each get their own reconnecting thread. A pinned
+    // board is matched to a key by its address ("psk = <ip>=<hex>" works too),
+    // or by the only key when there is exactly one.
     for (s.clients) |client| {
         const hp = splitHostPort(client, s.port);
+        const psk = settings.lookupPsk(s.psk, hp.host) orelse
+            (if (s.psk.len == 1) settings.lookupPsk(s.psk, s.psk[0][0 .. std.mem.indexOfScalar(u8, s.psk[0], '=') orelse 0]) else null) orelse {
+            log.err("no key for pinned board {s}: run `hcibridge claim {s}`", .{ hp.host, hp.host });
+            return 2;
+        };
         const ctx = try gpa.create(ClientCtx);
-        ctx.* = .{ .io = io, .gpa = gpa, .host = hp.host, .port = hp.port, .vhci = s.vhci, .reconnect_ms = s.reconnect_ms };
+        ctx.* = .{ .io = io, .gpa = gpa, .host = hp.host, .port = hp.port, .vhci = s.vhci, .reconnect_ms = s.reconnect_ms, .psk = psk };
         if (s.once and s.clients.len == 1 and !s.discovery) {
             // one-shot for scripting/tests
             const addr = try Io.net.IpAddress.resolve(io, hp.host, hp.port);
-            _ = board.run(io, &addr, s.vhci, hp.host) catch {};
+            _ = board.run(io, &addr, s.vhci, hp.host, &psk) catch {};
             return 0;
         }
         const t = try std.Thread.spawn(.{}, clientThread, .{ctx});
@@ -225,6 +261,7 @@ fn runMode(io: Io, gpa: std.mem.Allocator, args: []const []const u8, env_map: *s
             .subnet = s.subnet,
             .allow = s.allow,
             .deny = s.deny,
+            .psk_entries = s.psk,
         });
         return 0;
     }
@@ -243,4 +280,5 @@ test {
     _ = @import("spec.zig");
     _ = @import("config.zig");
     _ = @import("settings.zig");
+    _ = @import("handshake.zig");
 }

@@ -20,3 +20,16 @@ CONFIG_BTDM_CTRL_PINNED_TO_CORE_0=y
 # Network specifics (Ethernet PHY/pins or WiFi) live in firmware/boards/*.conf
 CONFIG_ETH_USE_ESP32_EMAC=y
 CONFIG_ETH_PHY_INTERFACE_RMII=y
+
+# Signed firmware: OTA images must carry a valid ECDSA signature made with the
+# release key (firmware/secure_boot_signing_key.pem). No hardware secure boot,
+# so a USB reflash still works, but the network path only accepts our images.
+CONFIG_SECURE_SIGNED_APPS_NO_SECURE_BOOT=y
+CONFIG_SECURE_SIGNED_APPS_ECDSA_SCHEME=y
+CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT=y
+CONFIG_SECURE_BOOT_BUILD_SIGNED_BINARIES=y
+CONFIG_SECURE_BOOT_SIGNING_KEY="secure_boot_signing_key.pem"
+
+# Crypto for the board key: X25519 claim + HMAC-SHA256 handshake.
+CONFIG_MBEDTLS_ECDH_C=y
+CONFIG_MBEDTLS_ECP_DP_CURVE25519_ENABLED=y

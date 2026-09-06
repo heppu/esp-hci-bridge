@@ -58,12 +58,25 @@ Arch users have a `PKGBUILD`, Void a `void-template`, all on the release page.
 The package installs a background service that starts on boot and automatically
 finds any board on your network. Nothing else to configure.
 
-### 3. Pair your devices
+### 3. Claim the board
 
-Check the board showed up, then pair as usual:
+A fresh board talks to nobody until you claim it. Claiming pairs the board with
+this PC by exchanging a key, once, over the LAN:
 
 ```sh
-hcibridge list                 # your boards and their firmware version
+hcibridge list                 # find the board (KEY column says "no")
+sudo hcibridge claim <ip>      # pair it with this PC
+sudo rc-service hcibridged restart  # or: systemctl restart hcibridge
+```
+
+From then on the board only accepts this PC and the PC only trusts this board.
+A claimed board refuses any other claim, so nobody else on the network can take
+it over. To move a board to a different PC, erase it once over USB
+(`esptool erase_flash`) and re-flash.
+
+### 4. Pair your devices
+
+```sh
 bluetoothctl                   # scan / pair / connect, as with any adapter
 ```
 
@@ -76,9 +89,11 @@ rest by hand:
 
 | command | what it does |
 |---|---|
-| `hcibridge list` | discover boards and show firmware versions |
+| `hcibridge list` | discover boards, firmware versions, whether each is claimed |
+| `hcibridge claim <ip>` | pair a new board with this PC |
 | `hcibridge status <ip>` | full status of one board |
 | `hcibridge update <ip\|all> <file.bin>` | update firmware over the network |
+| `hcibridge reboot <ip>` | reboot a board |
 | `hcibridge run` | the daemon (started by the service) |
 
 There is a man page (`man hcibridge`) and shell completions for bash, zsh, and
@@ -94,7 +109,9 @@ hcibridge update all esp-hci-bridge.bin
 ```
 
 Boards keep two firmware slots and roll back automatically if an update fails to
-come online.
+come online. Updates are only accepted from the PC that claimed the board, and
+only for images signed with the project's release key. Anything you flash over
+USB still works, signed or not.
 
 ## Configuration
 
@@ -112,6 +129,7 @@ flag  >  environment variable  >  config file  >  built-in default
 | auto-discovery on/off | `discovery` | `--discovery` / `--no-discovery` | `HCIBRIDGE_DISCOVERY` |
 | accept only this IP range | `subnet` | `--subnet` | `HCIBRIDGE_SUBNET` |
 | pin specific boards | `client` | `--client` / `--host` | `HCIBRIDGE_CLIENTS` |
+| board keys (written by `claim`) | `psk` | `--psk` | `HCIBRIDGE_PSK` |
 | allow only these devices | `allow` | `--allow` | `HCIBRIDGE_ALLOW` |
 | block devices | `deny` | `--deny` | `HCIBRIDGE_DENY` |
 
@@ -140,9 +158,31 @@ welcome.
 
 ## More than one board
 
-Discovery handles as many boards as you like at once: plug another in and it
-shows up on its own, unplug one and its adapter disappears. Put one bridge in
-each room, or set `subnet` so the daemon only adopts boards on your own network.
+Discovery handles as many boards as you like at once: claim each one, and from
+then on it shows up on its own when plugged in and its adapter disappears when
+unplugged. Put one bridge in each room, or set `subnet` so the daemon only
+listens for boards on your own network.
+
+## Security model
+
+Everything a board does on the network is tied to a per-board key that only the
+board and the PC that claimed it know:
+
+- The TCP link carries raw HCI, so the board demands a proof of the key before
+  a single Bluetooth packet flows, and the PC demands the same of the board
+  before it exposes a new adapter to the kernel. An unclaimed board talks to
+  nobody.
+- Discovery announcements are signed with the key, so a spoofed announcement
+  cannot get the daemon to attach to an attacker's machine.
+- Firmware updates and reboots over HTTP need a proof of the key over the
+  exact request body, and the board verifies the ECDSA signature on every image
+  before it will boot it.
+
+The key is set up by `hcibridge claim` with an X25519 exchange. Someone
+watching the LAN during the claim learns nothing, but they could race you to
+claim a board that is still fresh, so claim boards right after flashing. There
+is no encryption on the HCI link itself. Anyone who can sniff your wired LAN
+can see what the gamepad sends, which is the same exposure as a USB extender.
 
 ---
 
@@ -178,6 +218,10 @@ OpenRC, runit, or s6).
 ## Build the firmware
 
 Needs Docker (it pulls the ESP-IDF toolchain and a Zig with Xtensa support).
+Images are signed. Without `firmware/secure_boot_signing_key.pem` the script
+makes a throwaway development key, which means boards running release firmware
+will reject your build over OTA (flash it over USB instead, or put the release
+key in place).
 
 ```sh
 scripts/firmware.sh build                              # default: olimex-esp32-poe
@@ -202,6 +246,7 @@ setup in `firmware/main/glue.c`. Pin assignments for the Olimex ESP32-POE are in
 |---|---|
 | `common/h4.zig` | HCI H4 packet framing, shared by firmware and host |
 | `common/discovery.zig` | the UDP discovery protocol |
+| `common/auth.zig`, `firmware/main/auth.c` | the board key: handshake, signatures, claim |
 | `firmware/` | ESP32 firmware (Zig logic + ESP-IDF glue) |
 | `host/` | the `hcibridge` binary: daemon, CLI, config, settings schema |
 | `host/spec.zig`, `host/settings.zig` | single sources for the CLI and its settings |
@@ -211,9 +256,11 @@ setup in `firmware/main/glue.c`. Pin assignments for the Olimex ESP32-POE are in
 ## Protocol
 
 Plain TCP carries HCI in H4 framing (one indicator byte, the HCI header, then
-the payload). One client per board; a new connection replaces the old one.
-Boards send `ESPHCI1 ANNOUNCE <bdaddr> <port> <name>` over UDP broadcast and
-answer probes. TCP keepalive drops a dead peer in about ten seconds.
+the payload). Each connection starts with a mutual HMAC-SHA256 challenge and
+response over the board key. One client per board, and a new authenticated
+connection replaces the old one. Boards send
+`ESPHCI1 ANNOUNCE <bdaddr> <port> <name> <sig>` over UDP broadcast and answer
+probes. TCP keepalive drops a dead peer in about ten seconds.
 
 ## Status
 

@@ -4,8 +4,10 @@
 const std = @import("std");
 const Io = std.Io;
 const h4 = @import("h4");
+const auth = @import("auth");
 const sim = @import("sim.zig");
 const session = @import("session.zig");
+const handshake = @import("handshake.zig");
 const testing = std.testing;
 
 fn runSim(io: Io, server: *Io.net.Server, ctrl: *sim.Controller) void {
@@ -27,11 +29,14 @@ test "reset round trip through daemon and sim" {
     const listen_addr: Io.net.IpAddress = .{ .ip4 = .loopback(0) };
     var server = try listen_addr.listen(io, .{ .reuse_address = true });
     defer server.deinit(io);
-    var ctrl: sim.Controller = .{};
+    const psk: auth.Psk = [_]u8{0x5a} ** 32;
+    var ctrl: sim.Controller = .{ .psk = psk };
     var sim_future = try io.concurrent(runSim, .{ io, &server, &ctrl });
 
     const tcp = try server.socket.address.connect(io, .{ .mode = .stream });
     try session.tuneSocket(tcp.socket.handle);
+    // Mutual authentication before any HCI flows.
+    try handshake.client(io, tcp, &psk);
 
     // AF_UNIX seqpacket pair keeps packet boundaries like /dev/vhci does.
     var fds: [2]i32 = undefined;
@@ -70,4 +75,42 @@ test "reset round trip through daemon and sim" {
 
     local.close(io);
     sim_future.await(io);
+}
+
+fn runSimOnce(io: Io, server: *Io.net.Server, ctrl: *sim.Controller) ?anyerror {
+    var stream = server.accept(io) catch |e| return e;
+    defer stream.close(io);
+    sim.serve(io, stream, ctrl) catch |e| return e;
+    return null;
+}
+
+test "wrong key fails the handshake on both sides" {
+    const io = testing.io;
+    const listen_addr: Io.net.IpAddress = .{ .ip4 = .loopback(0) };
+    var server = try listen_addr.listen(io, .{ .reuse_address = true });
+    defer server.deinit(io);
+    var ctrl: sim.Controller = .{ .psk = [_]u8{1} ** 32 };
+    var sim_future = try io.concurrent(runSimOnce, .{ io, &server, &ctrl });
+
+    const tcp = try server.socket.address.connect(io, .{ .mode = .stream });
+    const wrong: auth.Psk = [_]u8{2} ** 32;
+    // Board rejects our proof and closes; we either see AuthFailed or a dead socket.
+    if (handshake.client(io, tcp, &wrong)) |_| return error.TestUnexpectedSuccess else |_| {}
+    tcp.close(io);
+    const sim_err = sim_future.await(io);
+    try testing.expect(sim_err != null);
+}
+
+test "unclaimed sim refuses HCI connections" {
+    const io = testing.io;
+    const listen_addr: Io.net.IpAddress = .{ .ip4 = .loopback(0) };
+    var server = try listen_addr.listen(io, .{ .reuse_address = true });
+    defer server.deinit(io);
+    var ctrl: sim.Controller = .{}; // no psk
+    var sim_future = try io.concurrent(runSimOnce, .{ io, &server, &ctrl });
+    const tcp = try server.socket.address.connect(io, .{ .mode = .stream });
+    const psk: auth.Psk = [_]u8{3} ** 32;
+    if (handshake.client(io, tcp, &psk)) |_| return error.TestUnexpectedSuccess else |_| {}
+    tcp.close(io);
+    try testing.expect(sim_future.await(io) != null);
 }

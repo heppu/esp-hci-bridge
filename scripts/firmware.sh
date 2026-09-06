@@ -32,6 +32,17 @@ if [ -f "$ROOT/firmware/$BUILD_DIR/sdkconfig" ]; then
         fi
     done
 fi
+# Signed images: OTA only accepts images signed with this key. CI uses the
+# release key from a secret; locally a throwaway dev key is generated (dev
+# builds then cannot be pushed to boards running release firmware).
+if [ ! -f "$ROOT/firmware/secure_boot_signing_key.pem" ]; then
+    echo "no firmware/secure_boot_signing_key.pem, generating a dev signing key (not the release key)"
+    docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$ROOT":/project -w /project/firmware \
+        "$IDF_IMAGE" espsecure.py generate_signing_key --version 1 secure_boot_signing_key.pem >/dev/null 2>&1 \
+        || docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$ROOT":/project -w /project/firmware \
+        "$IDF_IMAGE" bash -c ". /opt/esp/idf/export.sh >/dev/null 2>&1; espsecure.py generate_signing_key --version 1 secure_boot_signing_key.pem"
+fi
+
 IDF_ARGS="-B $BUILD_DIR -DSDKCONFIG=$BUILD_DIR/sdkconfig -DSDKCONFIG_DEFAULTS=sdkconfig.defaults;boards/$BOARD.conf"
 
 DEVICE_ARGS=""

@@ -4,6 +4,8 @@
 const std = @import("std");
 const Io = std.Io;
 const disc = @import("discovery");
+const auth = @import("auth");
+const settings = @import("settings.zig");
 const board = @import("board.zig");
 
 const log = std.log.scoped(.manager);
@@ -16,6 +18,9 @@ pub const Options = struct {
     subnet: []const u8 = "",
     allow: []const []const u8 = &.{},
     deny: []const []const u8 = &.{},
+    /// "bdaddr=hex" entries from `hcibridge claim`. Boards without one are
+    /// never attached.
+    psk_entries: []const []const u8 = &.{},
 };
 
 const Cidr = struct {
@@ -84,10 +89,11 @@ const BoardCtx = struct {
     bdaddr: []u8,
     name: []u8,
     vhci_path: []const u8,
+    psk: auth.Psk,
 };
 
 fn boardThread(ctx: *BoardCtx) void {
-    _ = board.run(ctx.io, &ctx.addr, ctx.vhci_path, ctx.name) catch |err| {
+    _ = board.run(ctx.io, &ctx.addr, ctx.vhci_path, ctx.name, &ctx.psk) catch |err| {
         log.warn("[{s}] session ended: {s}", .{ ctx.name, @errorName(err) });
     };
     ctx.active.release(ctx.bdaddr);
@@ -100,6 +106,13 @@ fn boardThread(ctx: *BoardCtx) void {
 
 pub fn run(io: Io, gpa: std.mem.Allocator, opts: Options) !void {
     var active = Active.init(gpa, io);
+    // Unclaimed boards are logged once each, not every 2 s.
+    var warned = std.StringHashMap(void).init(gpa);
+    defer {
+        var it = warned.keyIterator();
+        while (it.next()) |k| gpa.free(k.*);
+        warned.deinit();
+    }
 
     const bind_ip = Io.net.Ip4Address.parse(opts.bind, opts.discovery_port) catch Io.net.Ip4Address.unspecified(opts.discovery_port);
     const bind_addr: Io.net.IpAddress = .{ .ip4 = bind_ip };
@@ -141,6 +154,22 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: Options) !void {
         };
 
         if (!permits(opts, ann.bdaddr)) continue;
+
+        // Only boards we hold a key for, and only announces they signed.
+        const psk = settings.lookupPsk(opts.psk_entries, ann.bdaddr) orelse {
+            if (!warned.contains(ann.bdaddr)) {
+                if (gpa.dupe(u8, ann.bdaddr)) |k| warned.put(k, {}) catch gpa.free(k) else |_| {}
+                var abuf: [24]u8 = undefined;
+                const astr = std.fmt.bufPrint(&abuf, "{f}", .{msg.from}) catch "?";
+                log.warn("ignoring unclaimed board {s} ({s}) at {s}: run `hcibridge claim <ip>` to pair it", .{ ann.name, ann.bdaddr, astr });
+            }
+            continue;
+        };
+        if (!auth.verifyAnnounce(&psk, ann.bdaddr, ann.port, ann.name, ann.sig)) {
+            log.warn("ignoring announce for {s} with a bad signature (spoofed or stale key)", .{ann.bdaddr});
+            continue;
+        }
+
         if (opts.subnet.len > 0) {
             if (Cidr.parse(opts.subnet)) |cidr| {
                 switch (msg.from) {
@@ -176,6 +205,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: Options) !void {
                 continue;
             },
             .vhci_path = opts.vhci_path,
+            .psk = psk,
         };
 
         const t = std.Thread.spawn(.{}, boardThread, .{ctx}) catch |err| {

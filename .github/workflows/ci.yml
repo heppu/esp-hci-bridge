@@ -36,6 +36,15 @@ jobs:
           mkdir -p .tools/zig-xtensa
           curl -sSL https://github.com/kassane/zig-espressif-bootstrap/releases/download/0.16.0-xtensa/zig-relsafe-x86_64-linux-musl-baseline.tar.xz \
             | tar -xJ -C .tools/zig-xtensa --strip-components=1
+      - name: Signing key
+        shell: bash
+        env:
+          KEY: ${{ secrets.FIRMWARE_SIGNING_KEY }}
+        run: |
+          . /opt/esp/idf/export.sh
+          cd firmware
+          if [ -n "$KEY" ]; then printf '%s\n' "$KEY" > secure_boot_signing_key.pem
+          else espsecure.py generate_signing_key --version 1 secure_boot_signing_key.pem; fi
       - name: Build (olimex-esp32-poe + generic-wifi)
         shell: bash
         run: |

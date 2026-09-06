@@ -10,6 +10,15 @@ int bridge_on_controller_packet(uint8_t *data, uint16_t len);
 void bridge_on_controller_send_available(void);
 size_t bridge_stats_json(char *buf, size_t len);
 
+// Implemented in auth.c
+bool auth_init(void);
+bool auth_claimed(void);
+bool auth_handshake(int fd);
+size_t auth_announce_sig(const char *bdaddr, unsigned port, const char *name, char *out, size_t outlen);
+bool auth_check_http(const char *method, const char *path, const uint8_t body_sha[32], const char *header_hex);
+bool auth_ct_equal(const uint8_t *a, const uint8_t *b, size_t n);
+int auth_claim(const uint8_t peer_pub[32], uint8_t our_pub[32]);
+
 // Implemented in net.c
 bool net_start(void);
 

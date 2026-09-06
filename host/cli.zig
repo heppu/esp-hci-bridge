@@ -3,7 +3,30 @@
 const std = @import("std");
 const Io = std.Io;
 const disc = @import("discovery");
+const auth = @import("auth");
 const httpc = @import("httpc.zig");
+const config = @import("config.zig");
+const settings = @import("settings.zig");
+const X25519 = std.crypto.dh.X25519;
+
+pub const default_config = "/etc/hcibridge/config";
+
+/// Loads psk entries from the config (main + .d). Caller deinit()s.
+fn loadKeys(io: Io, gpa: std.mem.Allocator, cfg_path: []const u8) !settings.Settings {
+    var raw = config.loadRaw(gpa, io, cfg_path) catch config.Raw{ .arena = std.heap.ArenaAllocator.init(gpa) };
+    defer raw.deinit();
+    return settings.resolve(gpa, raw.pairs.items, &.{}, null, null);
+}
+
+fn boardInfo(io: Io, gpa: std.mem.Allocator, addr: *const Io.net.IpAddress, bdaddr_out: *[17]u8) !struct { bdaddr: []const u8, claimed: bool } {
+    var r = try httpc.get(io, gpa, addr, "/");
+    defer r.deinit(gpa);
+    var buf: [32]u8 = undefined;
+    const b = httpc.jsonField(r.body, "bdaddr", &buf) orelse return error.NoBdaddr;
+    if (b.len != 17) return error.NoBdaddr;
+    @memcpy(bdaddr_out, b);
+    return .{ .bdaddr = bdaddr_out, .claimed = httpc.jsonBool(r.body, "claimed") orelse false };
+}
 
 const log = std.log;
 
@@ -85,7 +108,8 @@ fn printStatus(io: Io, gpa: std.mem.Allocator, w: *Io.Writer, b: *const Bridge) 
     var pbuf: [16]u8 = undefined;
     const ver = httpc.jsonField(r.body, "version", &vbuf) orelse "?";
     const part = httpc.jsonField(r.body, "partition", &pbuf) orelse "?";
-    w.print("{s:<18} {s:<21} {s:<17} {s:<12} {s}\n", .{ b.name(), astr, b.bdaddr(), ver, part }) catch {};
+    const claimed: []const u8 = if (httpc.jsonBool(r.body, "claimed")) |c| (if (c) "claimed" else "UNCLAIMED") else "?";
+    w.print("{s:<18} {s:<21} {s:<17} {s:<10} {s:<7} {s}\n", .{ b.name(), astr, b.bdaddr(), ver, part, claimed }) catch {};
 }
 
 pub fn list(io: Io, gpa: std.mem.Allocator, discovery_port: u16, window_ms: u32) !u8 {
@@ -99,7 +123,7 @@ pub fn list(io: Io, gpa: std.mem.Allocator, discovery_port: u16, window_ms: u32)
         try w.flush();
         return 0;
     }
-    try w.print("{s:<18} {s:<21} {s:<17} {s:<12} {s}\n", .{ "NAME", "ADDRESS", "BDADDR", "VERSION", "SLOT" });
+    try w.print("{s:<18} {s:<21} {s:<17} {s:<10} {s:<7} {s}\n", .{ "NAME", "ADDRESS", "BDADDR", "VERSION", "SLOT", "KEY" });
     for (bridges) |*b| printStatus(io, gpa, w, b);
     try w.flush();
     return 0;
@@ -137,17 +161,26 @@ fn readFile(io: Io, gpa: std.mem.Allocator, path: []const u8) ![]u8 {
     return out.toOwnedSlice(gpa);
 }
 
-fn updateOne(io: Io, gpa: std.mem.Allocator, addr: *const Io.net.IpAddress, image: []const u8) bool {
-    var before = httpc.get(io, gpa, addr, "/") catch null;
-    if (before) |*b| {
-        var vbuf: [32]u8 = undefined;
-        const v = httpc.jsonField(b.body, "version", &vbuf) orelse "?";
-        log.info("updating {f} (currently {s}), {d} bytes", .{ addr.*, v, image.len });
-        b.deinit(gpa);
-    } else {
-        log.info("updating {f}, {d} bytes", .{ addr.*, image.len });
-    }
-    var r = httpc.postBinary(io, gpa, addr, "/ota", image) catch |err| {
+fn authHeader(psk: *const auth.Psk, method: []const u8, path: []const u8, body: []const u8, out: *[80]u8) []const u8 {
+    var mac: [auth.mac_len * 2]u8 = undefined;
+    _ = auth.httpAuth(psk, method, path, body, &mac);
+    return std.fmt.bufPrint(out, "X-Bridge-Auth: {s}", .{&mac}) catch unreachable;
+}
+
+fn updateOne(io: Io, gpa: std.mem.Allocator, addr: *const Io.net.IpAddress, image: []const u8, keys: *const settings.Settings) bool {
+    var bd: [17]u8 = undefined;
+    const info = boardInfo(io, gpa, addr, &bd) catch |err| {
+        log.err("cannot query {f}: {s}", .{ addr.*, @errorName(err) });
+        return false;
+    };
+    const psk = settings.lookupPsk(keys.psk, info.bdaddr) orelse {
+        log.err("no key for {s} ({f}): run `hcibridge claim` first", .{ info.bdaddr, addr.* });
+        return false;
+    };
+    log.info("updating {f} ({s}), {d} bytes", .{ addr.*, info.bdaddr, image.len });
+    var hbuf: [80]u8 = undefined;
+    const hdr = authHeader(&psk, "POST", "/ota", image, &hbuf);
+    var r = httpc.postH(io, gpa, addr, "/ota", image, hdr) catch |err| {
         log.err("  ota failed: {s}", .{@errorName(err)});
         return false;
     };
@@ -160,12 +193,14 @@ fn updateOne(io: Io, gpa: std.mem.Allocator, addr: *const Io.net.IpAddress, imag
     return true;
 }
 
-pub fn update(io: Io, gpa: std.mem.Allocator, target: []const u8, path: []const u8, discovery_port: u16) !u8 {
+pub fn update(io: Io, gpa: std.mem.Allocator, target: []const u8, path: []const u8, discovery_port: u16, cfg_path: []const u8) !u8 {
     const image = readFile(io, gpa, path) catch |err| {
         log.err("cannot read {s}: {s}", .{ path, @errorName(err) });
         return 1;
     };
     defer gpa.free(image);
+    var keys = try loadKeys(io, gpa, cfg_path);
+    defer keys.deinit();
 
     if (std.mem.eql(u8, target, "all")) {
         const bridges = try collect(io, gpa, discovery_port, 2500);
@@ -178,7 +213,7 @@ pub fn update(io: Io, gpa: std.mem.Allocator, target: []const u8, path: []const 
         for (bridges) |*b| {
             var a = b.addr;
             a.setPort(80);
-            if (updateOne(io, gpa, &a, image)) ok += 1;
+            if (updateOne(io, gpa, &a, image, &keys)) ok += 1;
         }
         log.info("updated {d}/{d} bridges", .{ ok, bridges.len });
         return if (ok == bridges.len) 0 else 1;
@@ -188,5 +223,89 @@ pub fn update(io: Io, gpa: std.mem.Allocator, target: []const u8, path: []const 
         log.err("target must be an IPv4 address or 'all'", .{});
         return 2;
     } };
-    return if (updateOne(io, gpa, &addr, image)) 0 else 1;
+    return if (updateOne(io, gpa, &addr, image, &keys)) 0 else 1;
+}
+
+pub fn reboot(io: Io, gpa: std.mem.Allocator, ip: []const u8, cfg_path: []const u8) !u8 {
+    const addr: Io.net.IpAddress = .{ .ip4 = Io.net.Ip4Address.parse(ip, httpc.http_port) catch {
+        log.err("bad ip: {s}", .{ip});
+        return 2;
+    } };
+    var keys = try loadKeys(io, gpa, cfg_path);
+    defer keys.deinit();
+    var bd: [17]u8 = undefined;
+    const info = try boardInfo(io, gpa, &addr, &bd);
+    const psk = settings.lookupPsk(keys.psk, info.bdaddr) orelse {
+        log.err("no key for {s}: run `hcibridge claim {s}` first", .{ info.bdaddr, ip });
+        return 1;
+    };
+    var hbuf: [80]u8 = undefined;
+    const hdr = authHeader(&psk, "POST", "/reboot", "", &hbuf);
+    var r = try httpc.postH(io, gpa, &addr, "/reboot", "", hdr);
+    defer r.deinit(gpa);
+    if (r.status != 200) {
+        log.err("reboot rejected: HTTP {d}", .{r.status});
+        return 1;
+    }
+    log.info("{s} rebooting", .{ip});
+    return 0;
+}
+
+/// Pairs with an unclaimed board: X25519 exchange, PSK = SHA256(shared),
+/// written as a drop-in under <config>.d/. First claim wins; re-keying needs
+/// a factory reset of the board.
+pub fn claim(io: Io, gpa: std.mem.Allocator, ip: []const u8, cfg_path: []const u8) !u8 {
+    const addr: Io.net.IpAddress = .{ .ip4 = Io.net.Ip4Address.parse(ip, httpc.http_port) catch {
+        log.err("bad ip: {s}", .{ip});
+        return 2;
+    } };
+    var bd: [17]u8 = undefined;
+    const info = try boardInfo(io, gpa, &addr, &bd);
+    if (info.claimed) {
+        log.err("{s} ({s}) is already claimed. To re-key it, factory-reset the board first.", .{ ip, info.bdaddr });
+        return 1;
+    }
+
+    const kp = X25519.KeyPair.generate(io);
+    const pk_hex = std.fmt.bytesToHex(kp.public_key, .lower);
+    var r = try httpc.postBinary(io, gpa, &addr, "/claim", &pk_hex);
+    defer r.deinit(gpa);
+    if (r.status != 200) {
+        log.err("claim rejected: HTTP {d} {s}", .{ r.status, std.mem.trim(u8, r.body, " \r\n") });
+        return 1;
+    }
+    const board_hex = std.mem.trim(u8, r.body, " \r\n");
+    var board_pk: [32]u8 = undefined;
+    _ = std.fmt.hexToBytes(&board_pk, board_hex) catch {
+        log.err("bad board public key in reply", .{});
+        return 1;
+    };
+    const psk = try auth.derivePsk(kp.secret_key, board_pk);
+    const psk_hex = auth.pskToHex(&psk);
+
+    // Save as a drop-in: <config>.d/board-<bdaddr>.conf
+    var line_buf: [128]u8 = undefined;
+    const line = try std.fmt.bufPrint(&line_buf, "psk = {s}={s}\n", .{ info.bdaddr, &psk_hex });
+    var fname: [24]u8 = undefined;
+    for (info.bdaddr, 0..) |c, i| fname[i] = if (c == ':') '-' else c;
+    var path_buf: [512]u8 = undefined;
+    const dropin = try std.fmt.bufPrint(&path_buf, "{s}.d/board-{s}.conf", .{ cfg_path, fname[0..17] });
+
+    if (writeFile(io, dropin, line)) {
+        log.info("claimed {s} ({s}); key saved to {s}", .{ ip, info.bdaddr, dropin });
+        log.info("restart the service so it picks up the key: e.g. `rc-service hcibridged restart`", .{});
+    } else |err| {
+        log.warn("claimed {s} ({s}) but could not write {s}: {s}", .{ ip, info.bdaddr, dropin, @errorName(err) });
+        var obuf: [256]u8 = undefined;
+        var out = Io.File.stdout().writer(io, &obuf);
+        try out.interface.print("# add this line to {s} (or a .d drop-in):\n{s}", .{ cfg_path, line });
+        try out.interface.flush();
+    }
+    return 0;
+}
+
+fn writeFile(io: Io, path: []const u8, data: []const u8) !void {
+    const f = try Io.Dir.cwd().createFile(io, path, .{ .truncate = true });
+    defer f.close(io);
+    try f.writeStreamingAll(io, data);
 }

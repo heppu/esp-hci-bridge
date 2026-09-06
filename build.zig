@@ -16,6 +16,12 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    const auth = b.addModule("auth", .{
+        .root_source_file = b.path("common/auth.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     const version = b.option([]const u8, "version", "version string baked into the binary") orelse "dev";
     const options = b.addOptions();
     options.addOption([]const u8, "version", version);
@@ -27,7 +33,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("host/main.zig"),
             .target = target,
             .optimize = optimize,
-            .imports = &.{ .{ .name = "h4", .module = h4 }, .{ .name = "discovery", .module = discovery }, .{ .name = "build_options", .module = build_options } },
+            .imports = &.{ .{ .name = "h4", .module = h4 }, .{ .name = "discovery", .module = discovery }, .{ .name = "auth", .module = auth }, .{ .name = "build_options", .module = build_options } },
         }),
     });
     b.installArtifact(daemon);
@@ -38,20 +44,20 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("host/sim.zig"),
             .target = target,
             .optimize = optimize,
-            .imports = &.{ .{ .name = "h4", .module = h4 }, .{ .name = "discovery", .module = discovery } },
+            .imports = &.{ .{ .name = "h4", .module = h4 }, .{ .name = "discovery", .module = discovery }, .{ .name = "auth", .module = auth } },
         }),
     });
     b.installArtifact(sim);
 
     const test_step = b.step("test", "Run unit and integration tests");
-    const test_roots = [_][]const u8{ "common/h4.zig", "common/discovery.zig", "host/main.zig", "host/spec.zig", "host/settings.zig", "host/config.zig", "host/sim.zig", "host/httpc.zig", "host/integration_test.zig" };
+    const test_roots = [_][]const u8{ "common/h4.zig", "common/discovery.zig", "common/auth.zig", "host/main.zig", "host/spec.zig", "host/settings.zig", "host/config.zig", "host/sim.zig", "host/httpc.zig", "host/integration_test.zig" };
     for (test_roots) |root| {
         const t = b.addTest(.{
             .root_module = b.createModule(.{
                 .root_source_file = b.path(root),
                 .target = target,
                 .optimize = optimize,
-                .imports = &.{ .{ .name = "h4", .module = h4 }, .{ .name = "discovery", .module = discovery }, .{ .name = "build_options", .module = build_options } },
+                .imports = &.{ .{ .name = "h4", .module = h4 }, .{ .name = "discovery", .module = discovery }, .{ .name = "auth", .module = auth }, .{ .name = "build_options", .module = build_options } },
             }),
         });
         test_step.dependOn(&b.addRunArtifact(t).step);
@@ -130,13 +136,14 @@ pub fn build(b: *std.Build) void {
         };
         const rh4 = rmods.mod(b, "common/h4.zig", rt);
         const rdisc = rmods.mod(b, "common/discovery.zig", rt);
+        const rauth = rmods.mod(b, "common/auth.zig", rt);
         const exe = b.addExecutable(.{
             .name = "hcibridge",
             .root_module = b.createModule(.{
                 .root_source_file = b.path("host/main.zig"),
                 .target = rt,
                 .optimize = .ReleaseSafe,
-                .imports = &.{ .{ .name = "h4", .module = rh4 }, .{ .name = "discovery", .module = rdisc }, .{ .name = "build_options", .module = build_options } },
+                .imports = &.{ .{ .name = "h4", .module = rh4 }, .{ .name = "discovery", .module = rdisc }, .{ .name = "auth", .module = rauth }, .{ .name = "build_options", .module = build_options } },
             }),
         });
         const inst = b.addInstallArtifact(exe, .{ .dest_dir = .{ .override = .{ .custom = triple } } });

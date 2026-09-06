@@ -4,7 +4,10 @@
 //! firmware and easy to eyeball with tcpdump:
 //!
 //!   probe:    "ESPHCI1\tPROBE\n"
-//!   announce: "ESPHCI1\tANNOUNCE\t<bdaddr>\t<port>\t<name>\n"
+//!   announce: "ESPHCI1\tANNOUNCE\t<bdaddr>\t<port>\t<name>\t<sig>\n"
+//!
+//! `sig` is the announce signature from auth.zig (hex), or "-" when the board
+//! is unclaimed. Older five-field announces parse with sig = "-".
 //!
 //! A bridge broadcasts an announce periodically and also replies to a probe.
 //! The host broadcasts a probe on startup and then just listens.
@@ -21,6 +24,8 @@ pub const Announcement = struct {
     port: u16,
     /// Slice into the parsed buffer.
     name: []const u8,
+    /// Announce signature (hex) or "-" if the board has no key yet.
+    sig: []const u8 = "-",
 };
 
 pub const Message = union(enum) {
@@ -34,8 +39,8 @@ pub fn buildProbe(buf: []u8) []u8 {
     return std.fmt.bufPrint(buf, magic ++ "\tPROBE\n", .{}) catch unreachable;
 }
 
-pub fn buildAnnounce(buf: []u8, bdaddr: []const u8, port: u16, name: []const u8) error{NoSpace}![]u8 {
-    return std.fmt.bufPrint(buf, magic ++ "\tANNOUNCE\t{s}\t{d}\t{s}\n", .{ bdaddr, port, name }) catch return error.NoSpace;
+pub fn buildAnnounce(buf: []u8, bdaddr: []const u8, port: u16, name: []const u8, sig: []const u8) error{NoSpace}![]u8 {
+    return std.fmt.bufPrint(buf, magic ++ "\tANNOUNCE\t{s}\t{d}\t{s}\t{s}\n", .{ bdaddr, port, name, sig }) catch return error.NoSpace;
 }
 
 pub fn parse(data: []const u8) ParseError!Message {
@@ -54,12 +59,13 @@ pub fn parse(data: []const u8) ParseError!Message {
     const bdaddr = it.next() orelse return error.BadFormat;
     const port_s = it.next() orelse return error.BadFormat;
     const name = it.next() orelse return error.BadFormat;
+    const sig = it.next() orelse "-";
     if (it.next() != null) return error.BadFormat;
     if (bdaddr.len != 17) return error.BadFormat;
     const port = std.fmt.parseInt(u16, port_s, 10) catch return error.BadFormat;
     if (name.len == 0) return error.BadFormat;
 
-    return .{ .announce = .{ .bdaddr = bdaddr, .port = port, .name = name } };
+    return .{ .announce = .{ .bdaddr = bdaddr, .port = port, .name = name, .sig = sig } };
 }
 
 const testing = std.testing;
@@ -72,16 +78,20 @@ test "probe round trip" {
 
 test "announce round trip" {
     var buf: [128]u8 = undefined;
-    const a = try buildAnnounce(&buf, "a0:a3:b3:2f:61:1e", 4444, "esp-hci-bridge");
+    const a = try buildAnnounce(&buf, "a0:a3:b3:2f:61:1e", 4444, "esp-hci-bridge", "-");
     const m = try parse(a);
     try testing.expectEqualStrings("a0:a3:b3:2f:61:1e", m.announce.bdaddr);
     try testing.expectEqual(@as(u16, 4444), m.announce.port);
     try testing.expectEqualStrings("esp-hci-bridge", m.announce.name);
+    try testing.expectEqualStrings("-", m.announce.sig);
+    const b = try buildAnnounce(&buf, "a0:a3:b3:2f:61:1e", 4444, "x", "0011223344556677889900aabbccddee");
+    try testing.expectEqualStrings("0011223344556677889900aabbccddee", (try parse(b)).announce.sig);
 }
 
 test "parse tolerates missing trailing newline" {
     const m = try parse(magic ++ "\tANNOUNCE\t11:22:33:44:55:66\t4444\tx");
     try testing.expectEqualStrings("11:22:33:44:55:66", m.announce.bdaddr);
+    try testing.expectEqualStrings("-", m.announce.sig); // five-field compat
 }
 
 test "rejects junk" {
@@ -89,5 +99,5 @@ test "rejects junk" {
     try testing.expectError(error.BadFormat, parse(magic ++ "\tANNOUNCE\t11:22\t4444\tn"));
     try testing.expectError(error.UnknownKind, parse(magic ++ "\tHELLO\n"));
     try testing.expectError(error.BadFormat, parse(magic ++ "\tANNOUNCE\taa:bb:cc:dd:ee:ff\tnotaport\tn"));
-    try testing.expectError(error.BadFormat, parse(magic ++ "\tANNOUNCE\taa:bb:cc:dd:ee:ff\t4444\tn\textra"));
+    try testing.expectError(error.BadFormat, parse(magic ++ "\tANNOUNCE\taa:bb:cc:dd:ee:ff\t4444\tn\tsig\textra"));
 }

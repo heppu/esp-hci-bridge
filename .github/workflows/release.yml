@@ -24,6 +24,12 @@ jobs:
           mkdir -p .tools/zig-xtensa
           curl -sSL https://github.com/kassane/zig-espressif-bootstrap/releases/download/0.16.0-xtensa/zig-relsafe-x86_64-linux-musl-baseline.tar.xz \
             | tar -xJ -C .tools/zig-xtensa --strip-components=1
+      - name: Release signing key
+        env:
+          KEY: ${{ secrets.FIRMWARE_SIGNING_KEY }}
+        run: |
+          test -n "$KEY" || { echo "FIRMWARE_SIGNING_KEY secret missing: refusing to release an image boards would not accept"; exit 1; }
+          printf '%s\n' "$KEY" > firmware/secure_boot_signing_key.pem
       - name: Build ${{ matrix.board }}
         shell: bash
         run: |

@@ -31,6 +31,7 @@ const glue = struct {
     extern fn glue_bt_send_available() bool;
     extern fn glue_bt_send(data: [*]const u8, len: u16) void;
     extern fn glue_tcp_port() u16;
+    extern fn glue_auth_handshake(fd: c_int) bool;
 };
 
 const log = std.log.scoped(.bridge);
@@ -171,6 +172,13 @@ fn rxTask(_: ?*anyopaque) callconv(.c) void {
 fn acceptClient(re: *h4.Reassembler) void {
     const new_fd = glue.glue_accept(state.listen_fd);
     if (new_fd < 0) return;
+
+    // Prove the key before this peer gets the radio or evicts the real host.
+    if (!glue.glue_auth_handshake(new_fd)) {
+        log.warn("rejected unauthenticated connection", .{});
+        glue.glue_close(new_fd);
+        return;
+    }
 
     const old = state.client_fd.swap(-1, .acq_rel);
     if (old >= 0) {

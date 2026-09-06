@@ -47,8 +47,18 @@ pub const commands = [_]Cmd{
         .args = "<ip>",
     },
     .{
+        .name = "claim",
+        .summary = "pair with an unclaimed bridge: agree a key and save it to the config",
+        .args = "<ip>",
+    },
+    .{
+        .name = "reboot",
+        .summary = "reboot a bridge (requires its key)",
+        .args = "<ip>",
+    },
+    .{
         .name = "update",
-        .summary = "push a firmware image over OTA to one bridge or all",
+        .summary = "push a firmware image over OTA to one bridge or all (requires keys)",
         .args = "<ip|all> <file>",
         .opts = &.{
             .{ .long = "--discovery-port", .arg = "n", .help = "UDP discovery port (default 4445)" },
