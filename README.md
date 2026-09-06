@@ -12,7 +12,7 @@ Ethernet away, powered by PoE.
           |  Bluetooth
    +------+------+          TCP, H4 framed HCI          +-----------------+
    | ESP32-POE   | <----------------------------------> | PC              |
-   | BT ctrl only|   port 4444                          | hcibridged      |
+   | BT ctrl only|   port 4444                          | hcibridge run   |
    | bridge.zig  |                                      |   -> /dev/vhci  |
    +-------------+                                      |   -> bluez      |
                                                         +-----------------+
@@ -25,7 +25,7 @@ Ethernet away, powered by PoE.
 | `common/h4.zig` | H4 packet reassembly, shared by firmware and host, allocation free |
 | `firmware/main/bridge.zig` | ESP32 logic: TCP server, byte pumps, flow control, stats |
 | `firmware/main/glue.c` | ESP-IDF glue: Ethernet, BT controller, sockets, FreeRTOS objects |
-| `host/main.zig` | `hcibridged`, connects to the bridge and feeds `/dev/vhci` |
+| `host/main.zig` | `hcibridge` CLI: run (daemon), list, status, update |
 | `host/session.zig` | one bridge session, both directions |
 | `host/sim.zig` | `hcibridge-sim`, fake controller for testing without hardware |
 | `host/openrc/` | OpenRC service files |
@@ -57,7 +57,7 @@ esp-hci-bridge     172.16.135.242:4444   a0:a3:b3:2f:61:1e v0.3.0       ota_0
 
 ## Discovery and multiple boards
 
-By default `hcibridged` runs in discovery mode: it finds every ESP bridge on
+By default `hcibridge run` operates in discovery mode: it finds every ESP bridge on
 the LAN by UDP broadcast (port 4445) and gives each its own `/dev/vhci`
 adapter, so bluez sees one controller per board and keeps bonds per board.
 Plug in another board and it appears on its own; power one off and its adapter
@@ -68,16 +68,8 @@ every 2s and also answers a probe. The protocol lives in `common/discovery.zig`.
 
 ## Host side
 
-Needs Zig 0.16, kernel with `hci_vhci`, bluez.
-
-```
-zig build -Doptimize=ReleaseSafe
-sudo install -m 755 zig-out/bin/hcibridged /usr/local/bin/
-sudo install -m 755 host/openrc/hcibridged /etc/init.d/
-sudo install -m 644 host/openrc/hcibridged.confd /etc/conf.d/hcibridged
-sudo rc-update add hcibridged default
-sudo rc-service hcibridged start
-```
+Needs a kernel with `hci_vhci` and bluez. Build needs Zig 0.16, or grab a
+static binary from the latest release (no toolchain, no libc).
 
 Install as a boot service:
 
