@@ -107,7 +107,9 @@ rest by hand:
 | `hcibridge run` | the daemon (started by the service) |
 
 There is a man page (`man hcibridge`) and shell completions for bash, zsh, and
-fish, all installed by the package.
+fish, all installed by the package. Board keys are readable by root only, so
+`claim`, `revoke`, `unclaim`, `update`, and `reboot` need `sudo` or `doas`.
+`list` and `status` do not.
 
 ### Updating firmware
 
