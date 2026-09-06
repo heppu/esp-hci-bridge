@@ -13,6 +13,7 @@ const glue = struct {
     extern fn glue_poll2(a: c_int, b: c_int, timeout_ms: c_int) c_int;
     extern fn glue_recv(fd: c_int, buf: [*]u8, len: usize) c_int;
     extern fn glue_send(fd: c_int, buf: [*]const u8, len: usize) c_int;
+    extern fn glue_shutdown(fd: c_int) void;
     extern fn glue_close(fd: c_int) void;
     extern fn glue_sb_create(size: usize) ?*anyopaque;
     extern fn glue_sb_send(sb: *anyopaque, data: [*]const u8, len: usize, timeout_ms: u32) usize;
@@ -65,6 +66,9 @@ const State = struct {
     /// the new connection.
     tx_pause: std.atomic.Value(bool) = .init(false),
     tx_idle: std.atomic.Value(bool) = .init(false),
+    /// Set by the tx task on a send error. Only the rx task closes sockets,
+    /// so a tx failure is reported here and acted on from the rx loop.
+    tx_failed: std.atomic.Value(bool) = .init(false),
     sb: ?*anyopaque = null,
     send_sem: ?*anyopaque = null,
     stats: Stats = .{},
@@ -143,7 +147,9 @@ fn rxTask(_: ?*anyopaque) callconv(.c) void {
             continue;
         }
         if (ready & 1 != 0) acceptClient(&re);
-        if (ready & 2 != 0 and client >= 0) {
+        if (state.tx_failed.swap(false, .acq_rel)) dropClient("send failed");
+        // Accepting may have swapped the client, the fd polled above is then gone.
+        if (ready & 2 != 0 and client >= 0 and state.client_fd.load(.acquire) == client) {
             const n = glue.glue_recv(client, &rx_chunk, rx_chunk.len);
             if (n <= 0) {
                 dropClient("host closed connection");
@@ -183,11 +189,16 @@ fn acceptClient(re: *h4.Reassembler) void {
     const old = state.client_fd.swap(-1, .acq_rel);
     if (old >= 0) {
         log.warn("replacing existing host connection", .{});
-        glue.glue_close(old);
+        // Shutdown unblocks a pending send but keeps the fd number reserved
+        // until tx has parked, so nothing else can be handed that number.
+        glue.glue_shutdown(old);
     }
     re.reset();
+    state.tx_idle.store(false, .release);
     state.tx_pause.store(true, .release);
     while (!state.tx_idle.load(.acquire)) glue.glue_delay_ms(1);
+    if (old >= 0) glue.glue_close(old);
+    _ = state.tx_failed.swap(false, .acq_rel);
     drainStreamBuffer();
     state.client_fd.store(new_fd, .release);
     state.tx_pause.store(false, .release);
@@ -247,7 +258,8 @@ fn txTask(_: ?*anyopaque) callconv(.c) void {
             continue;
         }
         if (glue.glue_send(client, &tx_chunk, n) < 0) {
-            dropClient("send failed");
+            state.tx_failed.store(true, .release);
+            glue.glue_delay_ms(2);
         }
     }
 }

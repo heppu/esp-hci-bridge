@@ -14,13 +14,17 @@ size_t bridge_stats_json(char *buf, size_t len);
 bool auth_init(void);
 bool auth_claimed(void);
 bool auth_handshake(int fd);
-size_t auth_announce_sig(const char *bdaddr, unsigned port, const char *name, char *out, size_t outlen);
+size_t auth_announce_sig(const char *bdaddr, unsigned port, const char *name, const char *ip, char *out, size_t outlen);
+size_t auth_nonce_hex(char *out, size_t outlen);
+void auth_nonce_bump(void);
 bool auth_check_http(const char *method, const char *path, const uint8_t body_sha[32], const char *header_hex);
+bool auth_check_http_pre(const char *method, const char *path, uint32_t content_len, const char *header_hex);
 bool auth_ct_equal(const uint8_t *a, const uint8_t *b, size_t n);
 int auth_claim(const uint8_t peer_pub[32], uint8_t our_pub[32]);
 
 // Implemented in net.c
 bool net_start(void);
+bool net_ip_str(char *out, size_t len);
 
 // Implemented in ota.c
 void ota_init(void);
@@ -32,6 +36,7 @@ int glue_accept(int lfd);
 int glue_poll2(int fd_a, int fd_b, int timeout_ms);
 int glue_recv(int fd, void *buf, size_t len);
 int glue_send(int fd, const void *buf, size_t len);
+void glue_shutdown(int fd);
 void glue_close(int fd);
 
 void *glue_sb_create(size_t size);
