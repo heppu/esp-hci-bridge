@@ -15,10 +15,25 @@ jobs:
     strategy:
       matrix:
         board: [olimex-esp32-poe, wt32-eth01, generic-wifi]
+    env:
+      IDF_CCACHE_ENABLE: "1"
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: .tools/zig-xtensa
+          key: zig-xtensa-0.16.0-xtensa
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: .ccache
+          key: ccache-${{ hashFiles('firmware/sdkconfig.defaults', 'firmware/boards/**') }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ hashFiles('firmware/sdkconfig.defaults', 'firmware/boards/**') }}-
+            ccache-
       - name: Fetch Espressif Zig
         run: |
+          [ -x .tools/zig-xtensa/zig ] && exit 0
           mkdir -p .tools/zig-xtensa
           curl -sSL https://github.com/kassane/zig-espressif-bootstrap/releases/download/0.16.0-xtensa/zig-relsafe-x86_64-linux-musl-baseline.tar.xz \
             | tar -xJ -C .tools/zig-xtensa --strip-components=1
