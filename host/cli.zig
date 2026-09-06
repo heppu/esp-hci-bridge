@@ -29,6 +29,12 @@ pub fn loadKeys(io: Io, gpa: std.mem.Allocator, cfg_path: []const u8) !settings.
     return settings.resolve(gpa, raw.pairs.items, &.{}, envGet, @ptrCast(&env));
 }
 
+/// The key drop-ins are root-only, so a missing key as a normal user usually
+/// means "not root", not "not claimed".
+fn noKeyHint() []const u8 {
+    return if (std.os.linux.getuid() == 0) "run `hcibridge claim <ip>` first" else "the key file is root-only, run this with sudo or doas";
+}
+
 const BoardInfo = struct {
     bdaddr: []const u8,
     /// null: firmware before v0.10 (no key support at all)
@@ -201,7 +207,7 @@ fn updateOne(io: Io, gpa: std.mem.Allocator, addr: *const Io.net.IpAddress, imag
     var hdr: ?[]const u8 = null;
     if (info.claimed != null) {
         const psk = settings.lookupPsk(keys.psk, info.bdaddr) orelse {
-            log.err("no key for {s} ({f}): run `hcibridge claim` first", .{ info.bdaddr, addr.* });
+            log.err("no key for {s} ({f}): {s}", .{ info.bdaddr, addr.*, noKeyHint() });
             return false;
         };
         hdr = authHeaders(&psk, "POST", "/ota", info.nonce, image, &hbuf);
@@ -299,7 +305,7 @@ pub fn reboot(io: Io, gpa: std.mem.Allocator, ip: []const u8, cfg_path: []const 
     var bd: [17]u8 = undefined;
     const info = try boardInfo(io, gpa, &addr, &bd);
     const psk = settings.lookupPsk(keys.psk, info.bdaddr) orelse {
-        log.err("no key for {s}: run `hcibridge claim {s}` first", .{ info.bdaddr, ip });
+        log.err("no key for {s}: {s}", .{ info.bdaddr, noKeyHint() });
         return 1;
     };
     var hbuf: [160]u8 = undefined;
