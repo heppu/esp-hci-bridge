@@ -110,6 +110,18 @@ const Active = struct {
         defer self.mutex.unlock(self.io);
         _ = self.map.remove(bdaddr);
     }
+
+    /// Drops the live link of every board whose key is gone from the config.
+    fn revokeMissing(self: *Active, entries: []const []const u8) void {
+        self.mutex.lockUncancelable(self.io);
+        defer self.mutex.unlock(self.io);
+        var it = self.map.valueIterator();
+        while (it.next()) |ctx| {
+            if (settings.lookupPsk(entries, ctx.*.bdaddr) != null) continue;
+            log.info("{s} ({s}) key removed from config, revoking", .{ ctx.*.name, ctx.*.bdaddr });
+            ctx.*.link.kill(self.io);
+        }
+    }
 };
 
 const BoardCtx = struct {
@@ -240,23 +252,25 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: Options) !void {
         };
         if (isPinned(pinned.items, from_ip)) continue;
 
+        // Every announce is a chance to notice an edited config: a fresh claim
+        // attaches, a deleted key revokes a live board.
+        if (keys.refresh(io, gpa, &opts)) active.revokeMissing(keys.entries);
+
         // Only boards we hold a key for, and only announces they signed.
-        const psk = settings.lookupPsk(keys.entries, ann.bdaddr) orelse
-            (if (keys.refresh(io, gpa, &opts)) settings.lookupPsk(keys.entries, ann.bdaddr) else null) orelse
-            {
-                if (!warned.contains(ann.bdaddr)) {
-                    if (warned.count() >= max_warned) {
-                        var it = warned.keyIterator();
-                        while (it.next()) |k| gpa.free(k.*);
-                        warned.clearRetainingCapacity();
-                    }
-                    if (gpa.dupe(u8, ann.bdaddr)) |k| warned.put(k, {}) catch gpa.free(k) else |_| {}
-                    var abuf: [24]u8 = undefined;
-                    const astr = std.fmt.bufPrint(&abuf, "{f}", .{msg.from}) catch "?";
-                    log.warn("ignoring unclaimed board {s} ({s}) at {s}: run `hcibridge claim <ip>` to pair it", .{ ann.name, ann.bdaddr, astr });
+        const psk = settings.lookupPsk(keys.entries, ann.bdaddr) orelse {
+            if (!warned.contains(ann.bdaddr)) {
+                if (warned.count() >= max_warned) {
+                    var it = warned.keyIterator();
+                    while (it.next()) |k| gpa.free(k.*);
+                    warned.clearRetainingCapacity();
                 }
-                continue;
-            };
+                if (gpa.dupe(u8, ann.bdaddr)) |k| warned.put(k, {}) catch gpa.free(k) else |_| {}
+                var abuf: [24]u8 = undefined;
+                const astr = std.fmt.bufPrint(&abuf, "{f}", .{msg.from}) catch "?";
+                log.warn("ignoring unclaimed board {s} ({s}) at {s}: run `hcibridge claim <ip>` to pair it", .{ ann.name, ann.bdaddr, astr });
+            }
+            continue;
+        };
         var verified = auth.verifyAnnounce(&psk, ann.bdaddr, ann.port, ann.name, from_ip, ann.sig);
         if (!verified and keys.refresh(io, gpa, &opts)) {
             if (settings.lookupPsk(keys.entries, ann.bdaddr)) |fresh| {
