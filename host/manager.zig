@@ -165,8 +165,12 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: Options) !void {
             }
             continue;
         };
-        if (!auth.verifyAnnounce(&psk, ann.bdaddr, ann.port, ann.name, ann.sig)) {
-            log.warn("ignoring announce for {s} with a bad signature (spoofed or stale key)", .{ann.bdaddr});
+        const from_ip: [4]u8 = switch (msg.from) {
+            .ip4 => |v4| v4.bytes,
+            else => continue,
+        };
+        if (!auth.verifyAnnounce(&psk, ann.bdaddr, ann.port, ann.name, from_ip, ann.sig)) {
+            log.warn("ignoring announce for {s} with a bad signature (spoofed, replayed, or stale key)", .{ann.bdaddr});
             continue;
         }
 

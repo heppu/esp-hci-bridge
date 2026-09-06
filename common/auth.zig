@@ -56,35 +56,78 @@ pub fn boardMac(psk: *const Psk, client_nonce: *const Nonce, server_nonce: *cons
 }
 
 // ---------------------------------------------------------------------------
-// Announce signature: hex of first 16 bytes of HMAC(psk, "bdaddr\tport\tname").
+// Announce signature: hex of first 16 bytes of
+// HMAC(psk, "bdaddr\tport\tname\ta.b.c.d") where a.b.c.d is the board's own
+// IPv4 address. The host checks it against the datagram source, so a captured
+// announce cannot be replayed from another machine.
 // ---------------------------------------------------------------------------
 
-pub fn announceSig(psk: *const Psk, bdaddr: []const u8, port: u16, name: []const u8, out: *[announce_sig_hex_len]u8) []const u8 {
+pub fn announceSig(psk: *const Psk, bdaddr: []const u8, port: u16, name: []const u8, ip: [4]u8, out: *[announce_sig_hex_len]u8) []const u8 {
     var pbuf: [8]u8 = undefined;
     const port_s = std.fmt.bufPrint(&pbuf, "{d}", .{port}) catch unreachable;
-    const m = hmac(psk, &.{ bdaddr, "\t", port_s, "\t", name });
+    var ibuf: [16]u8 = undefined;
+    const ip_s = std.fmt.bufPrint(&ibuf, "{d}.{d}.{d}.{d}", .{ ip[0], ip[1], ip[2], ip[3] }) catch unreachable;
+    const m = hmac(psk, &.{ bdaddr, "\t", port_s, "\t", name, "\t", ip_s });
     const hex = std.fmt.bytesToHex(m[0..16], .lower);
     @memcpy(out, &hex);
     return out;
 }
 
-pub fn verifyAnnounce(psk: *const Psk, bdaddr: []const u8, port: u16, name: []const u8, sig: []const u8) bool {
+pub fn verifyAnnounce(psk: *const Psk, bdaddr: []const u8, port: u16, name: []const u8, ip: [4]u8, sig: []const u8) bool {
     var expect: [announce_sig_hex_len]u8 = undefined;
-    _ = announceSig(psk, bdaddr, port, name, &expect);
+    _ = announceSig(psk, bdaddr, port, name, ip, &expect);
     return ctEqual(&expect, sig);
 }
 
 // ---------------------------------------------------------------------------
-// HTTP auth header: hex(HMAC(psk, "<METHOD> <path>\n" || SHA256(body)))
+// HTTP proofs. The board publishes a nonce in its status JSON: 16 random bytes
+// chosen at boot followed by a big-endian 32-bit counter that advances after
+// every accepted request, so a captured proof is dead after it is used once.
+//
+//   X-Bridge-Auth: hex(HMAC(psk, "<METHOD> <path>\n" || nonce || SHA256(body)))
+//   X-Bridge-Pre:  hex(HMAC(psk, "PRE <METHOD> <path>\n" || nonce || be32(content_length)))
+//
+// Pre is checked before the body is read, so an upload without the key never
+// touches flash. Auth is checked after the body, before the image is activated.
 // ---------------------------------------------------------------------------
 
-pub fn httpAuth(psk: *const Psk, method: []const u8, path: []const u8, body: []const u8, out: *[mac_len * 2]u8) []const u8 {
+pub const http_nonce_len = 20;
+pub const HttpNonce = [http_nonce_len]u8;
+
+pub fn httpAuth(psk: *const Psk, method: []const u8, path: []const u8, nonce: *const HttpNonce, body: []const u8, out: *[mac_len * 2]u8) []const u8 {
+    var digest: [Sha256.digest_length]u8 = undefined;
+    Sha256.hash(body, &digest, .{});
+    const m = hmac(psk, &.{ method, " ", path, "\n", nonce, &digest });
+    const hex = std.fmt.bytesToHex(m, .lower);
+    @memcpy(out, &hex);
+    return out;
+}
+
+pub fn httpPre(psk: *const Psk, method: []const u8, path: []const u8, nonce: *const HttpNonce, content_len: u32, out: *[mac_len * 2]u8) []const u8 {
+    var len_be: [4]u8 = undefined;
+    std.mem.writeInt(u32, &len_be, content_len, .big);
+    const m = hmac(psk, &.{ "PRE ", method, " ", path, "\n", nonce, &len_be });
+    const hex = std.fmt.bytesToHex(m, .lower);
+    @memcpy(out, &hex);
+    return out;
+}
+
+/// Proof format of firmware before v0.10.3 (no nonce, replayable). Only used to
+/// push a fixed image onto boards that still run it.
+pub fn httpAuthLegacy(psk: *const Psk, method: []const u8, path: []const u8, body: []const u8, out: *[mac_len * 2]u8) []const u8 {
     var digest: [Sha256.digest_length]u8 = undefined;
     Sha256.hash(body, &digest, .{});
     const m = hmac(psk, &.{ method, " ", path, "\n", &digest });
     const hex = std.fmt.bytesToHex(m, .lower);
     @memcpy(out, &hex);
     return out;
+}
+
+pub fn hexToNonce(hex: []const u8) ?HttpNonce {
+    if (hex.len != http_nonce_len * 2) return null;
+    var n: HttpNonce = undefined;
+    _ = std.fmt.hexToBytes(&n, hex) catch return null;
+    return n;
 }
 
 // ---------------------------------------------------------------------------
@@ -134,10 +177,12 @@ test "handshake macs verify and are direction-bound" {
 test "announce sign/verify" {
     const psk: Psk = [_]u8{9} ** 32;
     var sig: [announce_sig_hex_len]u8 = undefined;
-    _ = announceSig(&psk, "a0:a3:b3:2f:61:1e", 4444, "esp-hci-bridge", &sig);
-    try testing.expect(verifyAnnounce(&psk, "a0:a3:b3:2f:61:1e", 4444, "esp-hci-bridge", &sig));
-    try testing.expect(!verifyAnnounce(&psk, "a0:a3:b3:2f:61:1e", 4445, "esp-hci-bridge", &sig));
-    try testing.expect(!verifyAnnounce(&psk, "a0:a3:b3:2f:61:1e", 4444, "evil", &sig));
+    _ = announceSig(&psk, "a0:a3:b3:2f:61:1e", 4444, "esp-hci-bridge", .{ 172, 16, 135, 242 }, &sig);
+    const ip: [4]u8 = .{ 172, 16, 135, 242 };
+    try testing.expect(verifyAnnounce(&psk, "a0:a3:b3:2f:61:1e", 4444, "esp-hci-bridge", ip, &sig));
+    try testing.expect(!verifyAnnounce(&psk, "a0:a3:b3:2f:61:1e", 4445, "esp-hci-bridge", ip, &sig));
+    try testing.expect(!verifyAnnounce(&psk, "a0:a3:b3:2f:61:1e", 4444, "evil", ip, &sig));
+    try testing.expect(!verifyAnnounce(&psk, "a0:a3:b3:2f:61:1e", 4444, "esp-hci-bridge", .{ 172, 16, 135, 243 }, &sig));
 }
 
 test "claim derives the same psk on both sides" {
