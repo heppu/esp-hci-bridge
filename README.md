@@ -47,6 +47,18 @@ sudo rc-update add hcibridged default
 sudo rc-service hcibridged start
 ```
 
+Install as a boot service (OpenRC):
+
+```
+doas scripts/install-host-service.sh
+```
+
+This builds the release binary, installs it to `/usr/local/bin`, adds the
+service, loads `hci_vhci` at boot, and starts it. The service orders itself
+before `bluetooth` so bluez sees the controller on boot, and supervises the
+daemon so it restarts on crash. Edit the board address in
+`/etc/conf.d/hcibridged`.
+
 Manual run:
 
 ```

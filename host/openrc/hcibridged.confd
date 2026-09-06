@@ -1,5 +1,6 @@
 # /etc/conf.d/hcibridged
-BRIDGE_HOST="esp-hci-bridge"
+# Board address. IP avoids depending on DNS at boot; change if it moves.
+BRIDGE_HOST="172.16.135.242"
 BRIDGE_PORT="4444"
 BRIDGE_VHCI="/dev/vhci"
 # Extra flags, e.g. "--reconnect-ms 500"
