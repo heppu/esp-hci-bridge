@@ -120,9 +120,9 @@ sudo apk add hcibridge</code></pre>
     <p class="meta">A signed repository for <code>x86_64</code>, <code>aarch64</code>, and <code>armv7</code>. <code>apk upgrade</code> picks up new releases. The service is <code>hcibridged</code> under OpenRC.</p>
   </div>
   <div class="panel" data-panel="arch" hidden>
-<pre><code>curl -LO https://github.com/heppu/esp-hci-bridge/releases/latest/download/PKGBUILD
-makepkg -si</code></pre>
-    <p class="meta">Builds from source, needs <code>zig</code>.</p>
+<pre><code>yay -S hcibridge
+sudo systemctl enable --now hcibridge</code></pre>
+    <p class="meta">From the <a href="https://aur.archlinux.org/packages/hcibridge">AUR</a>, built from source with the Zig in the Arch repos. Arch does not start services on install, hence the second line. Any AUR helper works, or <code>makepkg -si</code> on the PKGBUILD from the release page.</p>
   </div>
   <div class="panel" data-panel="void" hidden>
 <pre><code>curl -LO https://github.com/heppu/esp-hci-bridge/releases/latest/download/void-template
