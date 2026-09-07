@@ -12,3 +12,4 @@ dist/
 firmware/secure_boot_signing_key.pem
 dist-*/
 .ccache/
+packaging/keys/*.rsa

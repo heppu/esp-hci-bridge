@@ -61,6 +61,11 @@ contents:
     type: config|noreplace
     packager: apk
 
+apk:
+  signature:
+    key_file: packaging/keys/heppu-esp-hci-bridge.rsa
+    key_name: heppu-esp-hci-bridge
+
 overrides:
   deb:
     depends: [bluez]
