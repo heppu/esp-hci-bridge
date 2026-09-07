@@ -46,18 +46,33 @@ the terminal.
 Download the package for your distro from the
 [latest release](https://github.com/heppu/esp-hci-bridge/releases/latest):
 
+Every distro gets a signed package repository, so the normal upgrade command
+keeps the tool current afterwards.
+
+Debian, Ubuntu:
+
 ```sh
-sudo dpkg -i hcibridge_*_amd64.deb      # Debian, Ubuntu
-sudo rpm -i hcibridge-*.x86_64.rpm      # Fedora, RHEL
+sudo curl -fsSLo /etc/apt/keyrings/hcibridge.gpg https://heppu.github.io/esp-hci-bridge/hcibridge.gpg
+echo "deb [signed-by=/etc/apt/keyrings/hcibridge.gpg] https://heppu.github.io/esp-hci-bridge/deb stable main" | sudo tee /etc/apt/sources.list.d/hcibridge.list
+sudo apt update && sudo apt install hcibridge
 ```
 
-Alpine has a package repository, so `apk upgrade` keeps the tool current:
+Fedora, RHEL:
+
+```sh
+sudo curl -fsSLo /etc/yum.repos.d/hcibridge.repo https://heppu.github.io/esp-hci-bridge/rpm/hcibridge.repo
+sudo dnf install hcibridge
+```
+
+Alpine:
 
 ```sh
 sudo wget -O /etc/apk/keys/heppu-esp-hci-bridge.rsa.pub https://heppu.github.io/esp-hci-bridge/alpine/heppu-esp-hci-bridge.rsa.pub
 echo https://heppu.github.io/esp-hci-bridge/alpine | sudo tee -a /etc/apk/repositories
 sudo apk add hcibridge
 ```
+
+Plain package files are on the release page as well.
 
 Arch has a `PKGBUILD` and Void a template on the release page. The package
 installs a background service that starts on boot and finds boards on its own.

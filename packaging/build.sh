@@ -12,6 +12,11 @@ if [ ! -f packaging/keys/heppu-esp-hci-bridge.rsa ]; then
     echo "no packaging/keys/heppu-esp-hci-bridge.rsa, generating a dev signing key (not the release key)" >&2
     openssl genrsa -out packaging/keys/heppu-esp-hci-bridge.rsa 2048 2>/dev/null
 fi
+if [ ! -f packaging/keys/hcibridge.gpg ]; then
+    echo "no packaging/keys/hcibridge.gpg, generating a dev GPG key (not the release key)" >&2
+    gpg --batch --quick-gen-key --passphrase '' dev@example.invalid rsa2048 sign 0 2>/dev/null
+    gpg --batch --armor --export-secret-keys dev@example.invalid > packaging/keys/hcibridge.gpg
+fi
 else
     GIT_VERSION=$(git describe --tags 2>/dev/null || echo v0.0.0)
 fi
