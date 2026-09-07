@@ -2,10 +2,14 @@
 const std = @import("std");
 const Io = std.Io;
 
+const log = std.log;
+
 pub const repo = "heppu/esp-hci-bridge";
-const api_latest = "https://api.github.com/repos/" ++ repo ++ "/releases/latest";
+const latest_url = "https://github.com/" ++ repo ++ "/releases/latest";
 const download_base = "https://github.com/" ++ repo ++ "/releases/download/";
 const max_body = 4 * 1024 * 1024;
+const attempts = 3;
+const ua = std.http.Header{ .name = "user-agent", .value = "hcibridge" };
 
 pub const Latest = struct {
     tag: []const u8,
@@ -42,38 +46,102 @@ pub fn latest(client: *std.http.Client, gpa: std.mem.Allocator) !Latest {
     var arena = std.heap.ArenaAllocator.init(gpa);
     errdefer arena.deinit();
     const a = arena.allocator();
-    const meta = try get(client, a, api_latest);
-    const tag = tagName(meta) orelse return error.NoTagInRelease;
+    const tag = try retry(latestTag, .{ client, a });
     var url_buf: [256]u8 = undefined;
     const url = try std.fmt.bufPrint(&url_buf, "{s}{s}/SHA256SUMS", .{ download_base, tag });
     const sums = try get(client, a, url);
     return .{ .tag = tag, .sums = sums, .arena = arena };
 }
 
-fn get(client: *std.http.Client, gpa: std.mem.Allocator, url: []const u8) ![]u8 {
-    var out: Io.Writer.Allocating = .init(gpa);
-    defer out.deinit();
-    const res = try client.fetch(.{
-        .location = .{ .url = url },
-        .response_writer = &out.writer,
-        .extra_headers = &.{.{ .name = "user-agent", .value = "hcibridge" }},
-    });
-    if (res.status != .ok) return error.HttpStatus;
-    if (out.written().len > max_body) return error.ResponseTooLarge;
-    return out.toOwnedSlice();
+/// The release page redirects to /releases/tag/<tag>. No API call, so no
+/// unauthenticated rate limit to run into.
+fn latestTag(client: *std.http.Client, gpa: std.mem.Allocator) ![]const u8 {
+    const uri = try std.Uri.parse(latest_url);
+    // The redirect body is never read, so do not hand this connection back to the pool.
+    var req = try client.request(.GET, uri, .{ .redirect_behavior = .unhandled, .extra_headers = &.{ua}, .keep_alive = false });
+    defer req.deinit();
+    try req.sendBodiless();
+    var rbuf: [8192]u8 = undefined;
+    var res = try req.receiveHead(&rbuf);
+    if (res.head.status.class() != .redirect) {
+        log.err("GET {s}: HTTP {d}, expected a redirect to the latest tag", .{ latest_url, @intFromEnum(res.head.status) });
+        return error.HttpStatus;
+    }
+    const loc = res.head.location orelse return error.NoRedirectLocation;
+    const tag = tagFromLocation(loc) orelse return error.NoTagInRedirect;
+    return gpa.dupe(u8, tag);
 }
 
-/// Pulls "tag_name" out of the release JSON without a full parser.
-pub fn tagName(json: []const u8) ?[]const u8 {
-    const key = "\"tag_name\":";
-    const at = std.mem.indexOf(u8, json, key) orelse return null;
-    var i = at + key.len;
-    while (i < json.len and (json[i] == ' ' or json[i] == '\t' or json[i] == '\n')) i += 1;
-    if (i >= json.len or json[i] != '"') return null;
-    i += 1;
-    const end = std.mem.indexOfScalarPos(u8, json, i, '"') orelse return null;
-    const tag = json[i..end];
-    if (tag.len == 0 or tag.len > 64) return null;
+fn get(client: *std.http.Client, gpa: std.mem.Allocator, url: []const u8) ![]u8 {
+    return retry(getOnce, .{ client, gpa, url });
+}
+
+/// Follows redirects by hand: the client's own redirect path re-encodes the
+/// signed asset URLs GitHub hands out and the CDN answers 400 to the result.
+fn getOnce(client: *std.http.Client, gpa: std.mem.Allocator, url: []const u8) ![]u8 {
+    var loc_buf: [4096]u8 = undefined;
+    var cur: []const u8 = url;
+    var hops: usize = 0;
+    while (hops < 6) : (hops += 1) {
+        const uri = try std.Uri.parse(cur);
+        var req = try client.request(.GET, uri, .{ .redirect_behavior = .unhandled, .extra_headers = &.{ua}, .keep_alive = false });
+        defer req.deinit();
+        try req.sendBodiless();
+        var rbuf: [8192]u8 = undefined;
+        var res = try req.receiveHead(&rbuf);
+        const status = res.head.status;
+        if (status.class() == .redirect) {
+            const loc = res.head.location orelse return error.NoRedirectLocation;
+            if (loc.len > loc_buf.len) return error.RedirectTooLong;
+            @memcpy(loc_buf[0..loc.len], loc);
+            cur = loc_buf[0..loc.len];
+            continue;
+        }
+        if (status != .ok) {
+            // The signed CDN link is not valid before the second it was issued,
+            // and the first hop can land inside that second.
+            if (hops > 0 and (status == .bad_request or status == .forbidden)) return error.AssetNotReadyYet;
+            log.err("GET {s}: HTTP {d}", .{ cur, @intFromEnum(status) });
+            return error.HttpStatus;
+        }
+        var tbuf: [16 * 1024]u8 = undefined;
+        const body = res.reader(&tbuf);
+        var out: Io.Writer.Allocating = .init(gpa);
+        defer out.deinit();
+        _ = body.streamRemaining(&out.writer) catch return error.ReadFailed;
+        if (out.written().len > max_body) return error.ResponseTooLarge;
+        return out.toOwnedSlice();
+    }
+    return error.TooManyRedirects;
+}
+
+/// A flaky resolver or a dropped connection should not fail an update outright.
+fn retry(comptime f: anytype, args: anytype) @typeInfo(@TypeOf(f)).@"fn".return_type.? {
+    var n: usize = 0;
+    while (true) : (n += 1) {
+        return @call(.auto, f, args) catch |err| {
+            if (n + 1 >= attempts or !transient(err)) return err;
+            log.warn("{s}, retrying ({d}/{d})", .{ @errorName(err), n + 2, attempts });
+            args[0].io.sleep(Io.Duration.fromMilliseconds(1000), .awake) catch {};
+            continue;
+        };
+    }
+}
+
+fn transient(err: anyerror) bool {
+    return switch (err) {
+        error.AssetNotReadyYet, error.NameServerFailure, error.TemporaryNameServerFailure, error.ConnectionRefused, error.ConnectionResetByPeer, error.ConnectionTimedOut, error.NetworkUnreachable, error.HostLacksNetworkAddresses, error.EndOfStream, error.UnexpectedReadFailure, error.UnexpectedWriteFailure, error.HttpConnectionClosing => true,
+        else => false,
+    };
+}
+
+/// Pulls the tag out of a "/releases/tag/<tag>" location, absolute or relative.
+pub fn tagFromLocation(loc: []const u8) ?[]const u8 {
+    const marker = "/releases/tag/";
+    const at = std.mem.indexOf(u8, loc, marker) orelse return null;
+    var tag = loc[at + marker.len ..];
+    if (std.mem.indexOfAny(u8, tag, "?#/")) |end| tag = tag[0..end];
+    if (tag.len == 0 or tag.len > 64 or !std.ascii.isAlphanumeric(tag[0])) return null;
     for (tag) |c| if (!std.ascii.isAlphanumeric(c) and c != '.' and c != '-' and c != '_') return null;
     return tag;
 }
@@ -91,10 +159,11 @@ pub fn sumFor(sums: []const u8, name: []const u8) ?[]const u8 {
     return null;
 }
 
-test "tag name from release json" {
-    try std.testing.expectEqualStrings("v0.10.8", tagName("{\"url\":\"x\",\"tag_name\": \"v0.10.8\",\"name\":\"y\"}").?);
-    try std.testing.expect(tagName("{\"name\":\"y\"}") == null);
-    try std.testing.expect(tagName("{\"tag_name\":\"../evil\"}") == null);
+test "tag from redirect location" {
+    try std.testing.expectEqualStrings("v0.10.9", tagFromLocation("https://github.com/heppu/esp-hci-bridge/releases/tag/v0.10.9").?);
+    try std.testing.expectEqualStrings("v0.10.9", tagFromLocation("/heppu/esp-hci-bridge/releases/tag/v0.10.9?x=1").?);
+    try std.testing.expect(tagFromLocation("https://github.com/heppu/esp-hci-bridge/releases") == null);
+    try std.testing.expect(tagFromLocation("/releases/tag/../evil") == null);
 }
 
 test "sum lookup" {
