@@ -22,7 +22,12 @@ docker run --rm -v "$DIR:/in:ro" archlinux:latest bash -euc '
   useradd -m b && mkdir /b && cp /in/PKGBUILD /b/ && chown -R b /b
   su b -c "cd /b && makepkg --noconfirm >/dev/null 2>&1"
   pacman -U --noconfirm /b/hcibridge-[0-9]*-x86_64.pkg.tar.zst >/dev/null 2>&1
-  echo "installed: $(hcibridge --version)"' | check
+  echo "installed: $(hcibridge --version)"
+  # the -bin package replaces the source one, conflicts declared
+  mkdir /bb && cp /in/PKGBUILD-bin /bb/PKGBUILD && chown -R b /bb
+  su b -c "cd /bb && makepkg --noconfirm >/dev/null 2>&1"
+  pacman -U --noconfirm /bb/hcibridge-bin-[0-9]*-x86_64.pkg.tar.zst >/dev/null 2>&1
+  echo "installed-bin: $(hcibridge --version)"' | check
 # The same package under a real systemd, CI only: privileged systemd
 # containers are not safe on a workstation.
 if [ "${CI:-}" = true ]; then
@@ -57,12 +62,14 @@ want void && { echo "== void (xbps-src)"
 # Void's own CI recipe for running xbps-src as root in a container.
 docker run --rm --privileged -v "$DIR:/in:ro" ghcr.io/void-linux/void-buildroot-glibc:latest sh -euc '
   xbps-install -Sy git >/dev/null 2>&1
-  cd /tmp && git clone -q --depth 1 https://github.com/void-linux/void-packages.git && cd void-packages
+  cd /tmp && echo "clone start $(date +%T)" && git clone -q --depth 1 https://github.com/void-linux/void-packages.git && cd void-packages && echo "clone done $(date +%T)"
   echo XBPS_CHROOT_CMD=ethereal >> etc/conf
   echo XBPS_ALLOW_CHROOT_BREAKOUT=yes >> etc/conf
   ln -s / masterdir
   mkdir -p srcpkgs/hcibridge && cp /in/void-template srcpkgs/hcibridge/template
+  echo "build start $(date +%T)"
   ./xbps-src pkg hcibridge >/dev/null 2>&1 || ./xbps-src pkg hcibridge 2>&1 | tail -15
+  echo "build done $(date +%T)"
   xbps-rindex -a hostdir/binpkgs/*.xbps >/dev/null 2>&1
   xbps-install -Sy --repository=hostdir/binpkgs hcibridge >/dev/null 2>&1
   echo "installed: $(hcibridge --version)"' | check; }
