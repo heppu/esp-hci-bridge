@@ -22,7 +22,26 @@ docker run --rm -v "$DIR:/in:ro" archlinux:latest bash -euc '
   useradd -m b && mkdir /b && cp /in/PKGBUILD /b/ && chown -R b /b
   su b -c "cd /b && makepkg --noconfirm >/dev/null 2>&1"
   pacman -U --noconfirm /b/hcibridge-[0-9]*-x86_64.pkg.tar.zst >/dev/null 2>&1
-  echo "installed: $(hcibridge --version)"' | check; }
+  echo "installed: $(hcibridge --version)"' | check
+# The same package under a real systemd, CI only: privileged systemd
+# containers are not safe on a workstation.
+if [ "${CI:-}" = true ]; then
+  docker rm -f vr-arch >/dev/null 2>&1 || true
+  docker run -d --name vr-arch --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw -v "$DIR:/in:ro" archlinux:latest /sbin/init >/dev/null
+  docker exec vr-arch sh -c 'for i in $(seq 1 60); do systemctl is-system-running 2>/dev/null | grep -Eq "running|degraded" && exit 0; sleep 1; done; exit 1'
+  docker exec vr-arch bash -euc '
+    pacman -Syu --noconfirm --needed base-devel zig bluez >/dev/null 2>&1
+    useradd -m b && mkdir /b && cp /in/PKGBUILD /b/ && chown -R b /b
+    su b -c "cd /b && makepkg --noconfirm >/dev/null 2>&1"
+    pacman -U --noconfirm /b/hcibridge-[0-9]*-x86_64.pkg.tar.zst >/dev/null 2>&1
+    systemctl enable --now hcibridge >/dev/null 2>&1
+    sleep 2
+    echo "service: $(systemctl is-active hcibridge)"
+    journalctl -u hcibridge --no-pager -n 2' | tee /dev/stderr | grep -q "^service: active" || { echo "arch service did not start" >&2; docker rm -f vr-arch >/dev/null; exit 1; }
+  docker rm -f vr-arch >/dev/null
+else
+  echo "service: not started (systemd container needs CI=true)"
+fi; }
 
 want alpine && { echo "== alpine edge (abuild)"
 docker run --rm -v "$DIR:/in:ro" alpine:edge sh -euc '
