@@ -1,21 +1,34 @@
 # Template file for 'hcibridge'
 # Drop this in void-packages as srcpkgs/hcibridge/template and run xbps-src.
+# Void ships an older Zig, so the build fetches Zig 0.16 for the build host
+# and cross-compiles from there, which Zig does on its own.
 pkgname=hcibridge
 version=@PKGVER@
 revision=1
-hostmakedepends="zig"
+archs="x86_64 aarch64"
+create_wrksrc=yes
+build_wrksrc="esp-hci-bridge-${version}"
 depends="bluez"
 short_desc="Attach remote ESP32 Bluetooth bridges to the local Bluetooth stack"
 maintainer="Henri Koski <henri.koski@bitbrewers.fi>"
 license="MIT"
 homepage="https://github.com/heppu/esp-hci-bridge"
-distfiles="https://github.com/heppu/esp-hci-bridge/archive/refs/tags/v${version}.tar.gz"
-checksum=@SHA256@
+_zigver=0.16.0
+case "$XBPS_MACHINE" in
+	x86_64) _zigsum=70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00 ;;
+	aarch64) _zigsum=ea4b09bfb22ec6f6c6ceac57ab63efb6b46e17ab08d21f69f3a48b38e1534f17 ;;
+esac
+_zig="zig-${XBPS_MACHINE}-linux-${_zigver}"
+distfiles="https://github.com/heppu/esp-hci-bridge/archive/refs/tags/v${version}.tar.gz
+ https://ziglang.org/download/${_zigver}/${_zig}.tar.xz"
+checksum="@SHA256@
+ ${_zigsum}"
 conf_files="/etc/hcibridge/config /etc/hcibridge/config.d/50-example.conf /etc/hcibridge.conf"
 
 do_build() {
-	zig build -Doptimize=ReleaseSafe "-Dversion=v${version}"
-	zig build gen "-Dversion=v${version}"
+	export ZIG_GLOBAL_CACHE_DIR="${wrksrc}/zig-cache"
+	"${wrksrc}/${_zig}/zig" build -Doptimize=ReleaseSafe "-Dtarget=${XBPS_TARGET_MACHINE}-linux-musl" "-Dversion=v${version}"
+	"${wrksrc}/${_zig}/zig" build gen "-Dversion=v${version}"
 }
 
 do_install() {
