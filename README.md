@@ -49,11 +49,13 @@ whole Bluetooth controller into the Linux kernel, classic and BLE, so every
 program sees a normal adapter. Home Assistant on the same machine can use it
 too, as a full adapter in the room where the sensors are.
 
-**Streaming to the TV, Steam Link and friends.** That moves the video and
-encodes it, with the latency and quality that brings. This keeps the PC
-driving the display over a cable at full quality and only moves the
-Bluetooth side to where you sit. If you already have a long HDMI run, this
-completes it.
+**Streaming to the TV, Moonlight, Steam Link, and friends.** Those move the
+video: encode on the PC, decode on a client box, and the latency and
+compression that brings. Moonlight with Sunshine is the best of them and still
+adds a frame or two. This keeps the PC driving the display over a cable, full
+quality, no client device, and only moves the Bluetooth side to where you sit.
+The two are not rivals: no cable, use Moonlight. Cable, use this. Both, keep
+Moonlight for the laptop and this for the couch.
 
 **A USB extender or a long cable for the dongle.** Works for one room on a
 dedicated cable. This runs over the network you already have, through
