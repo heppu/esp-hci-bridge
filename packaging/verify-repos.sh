@@ -38,7 +38,7 @@ check() {
 LIVE=https://heppu.github.io/esp-hci-bridge
 
 echo "== debian"
-if boot vr-debian -e DEBIAN_FRONTEND=noninteractive debian:stable-slim sh -c 'apt-get -qq update >/dev/null && apt-get -qq install -y systemd ca-certificates curl >/dev/null && exec /sbin/init'; then
+if boot vr-debian -e DEBIAN_FRONTEND=noninteractive debian:stable-slim sh -c 'apt-get -qq update >/dev/null && apt-get -qq install -y systemd ca-certificates curl >/dev/null && exec /lib/systemd/systemd'; then
 docker exec vr-debian sh -euc "
   mkdir -p /etc/apt/keyrings
   install -m 644 /repo/hcibridge.gpg /etc/apt/keyrings/hcibridge.gpg
@@ -60,13 +60,17 @@ fi
 echo "== fedora"
 if boot vr-fedora fedora:latest sh -c 'dnf -q install -y systemd >/dev/null 2>&1 && exec /sbin/init'; then
 docker exec vr-fedora sh -euc "
+  # systemd-resolved's stub resolver does not work inside the container
+  systemctl disable --now systemd-resolved >/dev/null 2>&1 || true
+  printf 'nameserver 1.1.1.1\\nnameserver 8.8.8.8\\n' > /etc/resolv.conf
   if curl -sf -o /etc/yum.repos.d/hcibridge-live.repo $LIVE/rpm/hcibridge.repo; then
     sed -i 's/^\[hcibridge\]/[hcibridge-live]/' /etc/yum.repos.d/hcibridge-live.repo
     dnf -q install -y hcibridge >/dev/null 2>&1 && echo \"previous: \$(hcibridge --version)\" || echo 'previous: none'
     rm -f /etc/yum.repos.d/hcibridge-live.repo
   fi
   sed \"s|$LIVE|$URL|\" /repo/rpm/hcibridge.repo > /etc/yum.repos.d/hcibridge.repo
-  dnf -q install -y hcibridge >/dev/null 2>&1 || dnf -q upgrade -y hcibridge >/dev/null
+  dnf -y install hcibridge 2>&1 | tail -n 3
+  dnf -y upgrade hcibridge 2>&1 | tail -n 1
   echo \"installed: \$(hcibridge --version)\"
   sleep 2
   echo \"service: \$(systemctl is-active hcibridge)\"

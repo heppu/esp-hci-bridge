@@ -161,29 +161,7 @@ jobs:
               -e "s/@SHA_ARMV7@/$(h hcibridge-armv7-linux)/" packaging/PKGBUILD-bin.tmpl > out/PKGBUILD-bin
           sed -e "s/@PKGVER@/$VER/" -e "s/@SHA256@/$SHA/" packaging/void-template.tmpl > out/void-template
           ls -1 out/
-      - name: Build the Alpine repository
-        run: |
-          set -eu
-          VER="${GITHUB_REF_NAME#v}"
-          KEY=heppu-esp-hci-bridge
-          mkdir -p repo/alpine
-          cp packaging/keys/$KEY.rsa.pub repo/alpine/
-          for arch in x86_64 aarch64 armv7; do
-            mkdir -p "repo/alpine/$arch"
-            # apk fetches <name>-<version>.apk, whatever the file was called at build time
-            cp "out/hcibridge_${VER}_${arch}.apk" "repo/alpine/$arch/hcibridge-${VER}.apk"
-          done
-          docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD/repo/alpine:/r" -v "$PWD/packaging/keys:/keys:ro" alpine:3.22 \
-            sh -c 'for d in /r/*/; do cd "$d" && apk index --keys-dir /keys -o unsigned.tar.gz *.apk; done'
-          # abuild-sign without abuild: RSA-SHA1 over the index, prepended as its own tar
-          for d in repo/alpine/*/; do
-            ( cd "$d"
-              openssl dgst -sha1 -sign "$OLDPWD/packaging/keys/$KEY.rsa" -out ".SIGN.RSA.$KEY.rsa.pub" unsigned.tar.gz
-              tar -c --owner=0 --group=0 --numeric-owner ".SIGN.RSA.$KEY.rsa.pub" | head -c 1536 | gzip -9 > sig.tar.gz
-              cat sig.tar.gz unsigned.tar.gz > APKINDEX.tar.gz
-              rm -f sig.tar.gz unsigned.tar.gz ".SIGN.RSA.$KEY.rsa.pub" )
-          done
-      - name: Build the apt and rpm repositories
+      - name: Build the package repositories
         run: |
           sudo apt-get -qq update >/dev/null && sudo apt-get -qq install -y dpkg-dev apt-utils createrepo-c gnupg >/dev/null
           packaging/make-repos.sh out repo packaging/keys
