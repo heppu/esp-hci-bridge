@@ -15,6 +15,11 @@ check() {
     echo "$got" | grep -q '^installed: ' || { echo "install did not happen" >&2; exit 1; }
     [ -z "$VER" ] || echo "$got" | grep -q "$VER" || { echo "expected version $VER" >&2; exit 1; }
 }
+check_bin() {
+    got=$(cat)
+    echo "$got" | check
+    echo "$got" | grep -q '^installed-bin: hcibridge v' || { echo "hcibridge-bin did not install" >&2; exit 1; }
+}
 
 want arch && { echo "== arch (makepkg)"
 docker run --rm -v "$DIR:/in:ro" archlinux:latest bash -euc '
@@ -23,11 +28,17 @@ docker run --rm -v "$DIR:/in:ro" archlinux:latest bash -euc '
   su b -c "cd /b && makepkg --noconfirm >/dev/null 2>&1"
   pacman -U --noconfirm /b/hcibridge-[0-9]*-x86_64.pkg.tar.zst >/dev/null 2>&1
   echo "installed: $(hcibridge --version)"
-  # the -bin package replaces the source one, conflicts declared
-  mkdir /bb && cp /in/PKGBUILD-bin /bb/PKGBUILD && chown -R b /bb
-  su b -c "cd /bb && makepkg --noconfirm >/dev/null 2>&1"
+  # the -bin package replaces the source one, conflicts declared. Its release
+  # assets are not uploaded yet at this point, so hand makepkg the local copies
+  # under the names the PKGBUILD downloads them as, it still verifies checksums.
+  mkdir /bb && cp /in/PKGBUILD-bin /bb/PKGBUILD
+  v=$(sed -n "s/^pkgver=//p" /bb/PKGBUILD)
+  for a in hcibridge.1 hcibridge.bash _hcibridge hcibridge.fish; do cp "/in/$a" "/bb/$a-$v"; done
+  cp /in/hcibridge-x86_64-linux "/bb/hcibridge-$v-x86_64"
+  chown -R b /bb
+  su b -c "cd /bb && makepkg --noconfirm >/dev/null 2>&1" || su b -c "cd /bb && makepkg --noconfirm 2>&1 | tail -5"
   pacman -U --noconfirm /bb/hcibridge-bin-[0-9]*-x86_64.pkg.tar.zst >/dev/null 2>&1
-  echo "installed-bin: $(hcibridge --version)"' | check
+  echo "installed-bin: $(hcibridge --version)"' | check_bin
 # The same package under a real systemd, CI only: privileged systemd
 # containers are not safe on a workstation.
 if [ "${CI:-}" = true ]; then
