@@ -152,6 +152,13 @@ jobs:
           SHA512=$(sha512sum src.tar.gz | cut -d' ' -f1)
           sed -e "s/@PKGVER@/$VER/" -e "s/@SHA256@/$SHA/" packaging/PKGBUILD.tmpl > out/PKGBUILD
           sed -e "s/@PKGVER@/$VER/" -e "s/@SHA512@/$SHA512/" packaging/APKBUILD.tmpl > out/APKBUILD
+          # the -bin PKGBUILD pins every release asset it downloads
+          h() { sha256sum "out/$1" | cut -d' ' -f1; }
+          sed -e "s/@PKGVER@/$VER/" -e "s/@SHA256@/$SHA/" \
+              -e "s/@SHA_MAN@/$(h hcibridge.1)/" -e "s/@SHA_BASH@/$(h hcibridge.bash)/" \
+              -e "s/@SHA_ZSH@/$(h _hcibridge)/" -e "s/@SHA_FISH@/$(h hcibridge.fish)/" \
+              -e "s/@SHA_X86_64@/$(h hcibridge-x86_64-linux)/" -e "s/@SHA_AARCH64@/$(h hcibridge-aarch64-linux)/" \
+              -e "s/@SHA_ARMV7@/$(h hcibridge-armv7-linux)/" packaging/PKGBUILD-bin.tmpl > out/PKGBUILD-bin
           sed -e "s/@PKGVER@/$VER/" -e "s/@SHA256@/$SHA/" packaging/void-template.tmpl > out/void-template
           ls -1 out/
       - name: Build the Alpine repository
@@ -263,15 +270,16 @@ jobs:
         with:
           name: cli
           path: cli
-      - name: Generate .SRCINFO
+      - name: Generate .SRCINFO for both packages
         run: |
-          mkdir aur && cp cli/PKGBUILD aur/
+          mkdir -p aur/hcibridge aur/hcibridge-bin
+          cp cli/PKGBUILD aur/hcibridge/PKGBUILD
+          cp cli/PKGBUILD-bin aur/hcibridge-bin/PKGBUILD
           docker run --rm -v "$PWD/aur:/w" archlinux:latest bash -euc '
-            pacman -Sy --noconfirm --needed base-devel >/dev/null 2>&1
-            useradd -m b && chown b /w
-            su b -c "cd /w && makepkg --printsrcinfo > .SRCINFO"
-            chown '"$(id -u)"' /w/.SRCINFO'
-          cat aur/.SRCINFO
+            useradd -m b && chown -R b /w
+            for d in /w/*/; do su b -c "cd $d && makepkg --printsrcinfo > .SRCINFO"; done
+            chown -R '"$(id -u)"' /w'
+          cat aur/*/.SRCINFO
       - name: Push to the AUR
         env:
           KEY: ${{ secrets.AUR_SSH_KEY }}
@@ -281,12 +289,14 @@ jobs:
           printf '%s\n' "$KEY" > ~/.ssh/aur && chmod 600 ~/.ssh/aur
           ssh-keyscan -t ed25519 aur.archlinux.org >> ~/.ssh/known_hosts 2>/dev/null
           export GIT_SSH_COMMAND="ssh -i ~/.ssh/aur -o IdentitiesOnly=yes"
-          git clone -q ssh://aur@aur.archlinux.org/hcibridge.git repo
-          cp aur/PKGBUILD aur/.SRCINFO repo/
-          cd repo
-          git add PKGBUILD .SRCINFO
-          git -c user.name="esp-hci-bridge release" -c user.email="henri.koski@bitbrewers.fi" commit -qm "hcibridge ${GITHUB_REF_NAME#v}" || { echo "AUR already current"; exit 0; }
-          git push -q origin HEAD:master
+          for pkg in hcibridge hcibridge-bin; do
+            git clone -q "ssh://aur@aur.archlinux.org/$pkg.git" "repo-$pkg"
+            cp "aur/$pkg/PKGBUILD" "aur/$pkg/.SRCINFO" "repo-$pkg/"
+            ( cd "repo-$pkg"
+              git add PKGBUILD .SRCINFO
+              git -c user.name="esp-hci-bridge release" -c user.email="henri.koski@bitbrewers.fi" commit -qm "$pkg ${GITHUB_REF_NAME#v}" || { echo "$pkg already current"; exit 0; }
+              git push -q origin HEAD:master )
+          done
 
   pages:
     needs: release

@@ -25,7 +25,8 @@ boot() {
     [ "${CI:-}" = true ] || { echo "skipping systemd container $name: only allowed in CI (set CI=true on a disposable VM)"; return 1; }
     docker rm -f "$name" >/dev/null 2>&1 || true
     docker run -d --name "$name" --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw --network host -v "$REPO:/repo:ro" "$@" >/dev/null
-    docker exec "$name" sh -c 'for i in $(seq 1 60); do systemctl is-system-running 2>/dev/null | grep -Eq "running|degraded" && exit 0; sleep 1; done; echo "systemd did not come up" >&2; exit 1'
+    # The images install systemd first, so allow a few minutes before init answers.
+    docker exec "$name" sh -c 'for i in $(seq 1 300); do systemctl is-system-running 2>/dev/null | grep -Eq "running|degraded" && exit 0; sleep 1; done; echo "systemd did not come up" >&2; exit 1' || { docker logs "$name" 2>&1 | tail -5; docker rm -f "$name" >/dev/null 2>&1; return 1; }
 }
 check() {
     got=$(cat)
@@ -57,7 +58,7 @@ docker rm -f vr-debian >/dev/null
 fi
 
 echo "== fedora"
-if boot vr-fedora fedora:latest /sbin/init; then
+if boot vr-fedora fedora:latest sh -c 'dnf -q install -y systemd >/dev/null 2>&1 && exec /sbin/init'; then
 docker exec vr-fedora sh -euc "
   if curl -sf -o /etc/yum.repos.d/hcibridge-live.repo $LIVE/rpm/hcibridge.repo; then
     sed -i 's/^\[hcibridge\]/[hcibridge-live]/' /etc/yum.repos.d/hcibridge-live.repo
