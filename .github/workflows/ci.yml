@@ -73,7 +73,7 @@ jobs:
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: .tools/zig-xtensa
-          key: zig-xtensa-0.16.0-xtensa
+          key: zig-xtensa-0.16.0-xtensa-9e3dcef9
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: .ccache
