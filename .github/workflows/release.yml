@@ -84,7 +84,7 @@ jobs:
           merge-multiple: true
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: apk-repo
+          name: pkg-repos
           path: repo
       - name: Assemble site for all boards
         run: |
@@ -92,7 +92,7 @@ jobs:
             olimex-esp32-poe=fw/olimex-esp32-poe \
             wt32-eth01=fw/wt32-eth01 \
             generic-wifi=fw/generic-wifi
-          cp -r repo/alpine _site/alpine
+          cp -r repo/alpine repo/deb repo/rpm repo/hcibridge.gpg repo/hcibridge.gpg.pub _site/
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: site
@@ -109,12 +109,15 @@ jobs:
       - run: zig build release -Dversion="${GITHUB_REF_NAME}"
       - name: Generate man page and completions
         run: zig build gen -Dversion="${GITHUB_REF_NAME}"
-      - name: Package signing key
+      - name: Package signing keys
         env:
           KEY: ${{ secrets.APK_SIGNING_KEY }}
+          GPG: ${{ secrets.GPG_SIGNING_KEY }}
         run: |
           test -n "$KEY" || { echo "APK_SIGNING_KEY secret missing: refusing to release unsigned packages"; exit 1; }
+          test -n "$GPG" || { echo "GPG_SIGNING_KEY secret missing: refusing to release unsigned packages"; exit 1; }
           printf '%s\n' "$KEY" > packaging/keys/heppu-esp-hci-bridge.rsa
+          printf '%s\n' "$GPG" > packaging/keys/hcibridge.gpg
       - name: Install nfpm
         run: |
           NV=2.44.0
@@ -170,14 +173,19 @@ jobs:
               cat sig.tar.gz unsigned.tar.gz > APKINDEX.tar.gz
               rm -f sig.tar.gz unsigned.tar.gz ".SIGN.RSA.$KEY.rsa.pub" )
           done
-          find repo -type f | sort
+      - name: Build the apt and rpm repositories
+        run: |
+          sudo apt-get -qq update >/dev/null && sudo apt-get -qq install -y dpkg-dev apt-utils createrepo-c gnupg >/dev/null
+          packaging/make-repos.sh out repo packaging/keys
+      - name: Install from every repository in a container
+        run: packaging/verify-repos.sh repo "${GITHUB_REF_NAME}"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: cli
           path: out/
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: apk-repo
+          name: pkg-repos
           path: repo/
 
   release:
