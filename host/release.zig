@@ -9,7 +9,9 @@ const latest_url = "https://github.com/" ++ repo ++ "/releases/latest";
 const download_base = "https://github.com/" ++ repo ++ "/releases/download/";
 const max_body = 4 * 1024 * 1024;
 const attempts = 3;
-const ua = std.http.Header{ .name = "user-agent", .value = "hcibridge" };
+// Overrides the client default rather than adding a second user-agent line,
+// which some CDN frontends reject with 400.
+const headers = std.http.Client.Request.Headers{ .user_agent = .{ .override = "hcibridge" } };
 
 pub const Latest = struct {
     tag: []const u8,
@@ -58,7 +60,7 @@ pub fn latest(client: *std.http.Client, gpa: std.mem.Allocator) !Latest {
 fn latestTag(client: *std.http.Client, gpa: std.mem.Allocator) ![]const u8 {
     const uri = try std.Uri.parse(latest_url);
     // The redirect body is never read, so do not hand this connection back to the pool.
-    var req = try client.request(.GET, uri, .{ .redirect_behavior = .unhandled, .extra_headers = &.{ua}, .keep_alive = false });
+    var req = try client.request(.GET, uri, .{ .redirect_behavior = .unhandled, .headers = headers, .keep_alive = false });
     defer req.deinit();
     try req.sendBodiless();
     var rbuf: [8192]u8 = undefined;
@@ -84,7 +86,7 @@ fn getOnce(client: *std.http.Client, gpa: std.mem.Allocator, url: []const u8) ![
     var hops: usize = 0;
     while (hops < 6) : (hops += 1) {
         const uri = try std.Uri.parse(cur);
-        var req = try client.request(.GET, uri, .{ .redirect_behavior = .unhandled, .extra_headers = &.{ua}, .keep_alive = false });
+        var req = try client.request(.GET, uri, .{ .redirect_behavior = .unhandled, .headers = headers, .keep_alive = false });
         defer req.deinit();
         try req.sendBodiless();
         var rbuf: [8192]u8 = undefined;
@@ -98,10 +100,13 @@ fn getOnce(client: *std.http.Client, gpa: std.mem.Allocator, url: []const u8) ![
             continue;
         }
         if (status != .ok) {
-            // The signed CDN link is not valid before the second it was issued,
-            // and the first hop can land inside that second.
+            var ebuf: [512]u8 = undefined;
+            var tb: [4096]u8 = undefined;
+            const n = res.reader(&tb).readSliceShort(&ebuf) catch 0;
+            log.warn("GET {s}: HTTP {d} {s}", .{ cur, @intFromEnum(status), std.mem.trim(u8, ebuf[0..n], " \r\n") });
+            // A rejected signed link is worth one more round trip through the
+            // first hop, which hands out a fresh one.
             if (hops > 0 and (status == .bad_request or status == .forbidden)) return error.AssetNotReadyYet;
-            log.err("GET {s}: HTTP {d}", .{ cur, @intFromEnum(status) });
             return error.HttpStatus;
         }
         var tbuf: [16 * 1024]u8 = undefined;
