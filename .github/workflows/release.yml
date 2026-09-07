@@ -11,7 +11,7 @@ jobs:
   firmware:
     runs-on: ubuntu-latest
     container:
-      image: espressif/idf:v5.5.5
+      image: espressif/idf:v5.5.5@sha256:a9231d0697ab8f7517cc072e93b7c83e04907bfbfba80b6440d7dbbf90665cf2
     strategy:
       matrix:
         board: [olimex-esp32-poe, wt32-eth01, generic-wifi]
@@ -35,8 +35,9 @@ jobs:
         run: |
           [ -x .tools/zig-xtensa/zig ] && exit 0
           mkdir -p .tools/zig-xtensa
-          curl -sSL https://github.com/kassane/zig-espressif-bootstrap/releases/download/0.16.0-xtensa/zig-relsafe-x86_64-linux-musl-baseline.tar.xz \
-            | tar -xJ -C .tools/zig-xtensa --strip-components=1
+          curl -sSL -o zig-xtensa.tar.xz https://github.com/kassane/zig-espressif-bootstrap/releases/download/0.16.0-xtensa/zig-relsafe-x86_64-linux-musl-baseline.tar.xz
+          echo "9e3dcef9d6f6d552df641a12addc9e443a69b7cbdad85492ec677acd55b7de9b  zig-xtensa.tar.xz" | sha256sum -c -
+          tar -xJ -C .tools/zig-xtensa --strip-components=1 -f zig-xtensa.tar.xz && rm zig-xtensa.tar.xz
       - name: Tag must be on main
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -121,7 +122,9 @@ jobs:
       - name: Install nfpm
         run: |
           NV=2.44.0
-          curl -sSL "https://github.com/goreleaser/nfpm/releases/download/v${NV}/nfpm_${NV}_Linux_x86_64.tar.gz" | tar xz nfpm
+          curl -sSL -o nfpm.tgz "https://github.com/goreleaser/nfpm/releases/download/v${NV}/nfpm_${NV}_Linux_x86_64.tar.gz"
+          echo "1a12d47f104bdd5953d33bb1e97b369ffade9c429bfc070fd19977844100d3d2  nfpm.tgz" | sha256sum -c -
+          tar xzf nfpm.tgz nfpm && rm nfpm.tgz
           sudo install nfpm /usr/local/bin/nfpm
       - name: Build packages and metadata
         run: |

@@ -6,7 +6,7 @@
 set -eu
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-IDF_IMAGE=${IDF_IMAGE:-espressif/idf:v5.5.5}
+IDF_IMAGE=${IDF_IMAGE:-espressif/idf:v5.5.5@sha256:a9231d0697ab8f7517cc072e93b7c83e04907bfbfba80b6440d7dbbf90665cf2}
 ZIG_DIR="$ROOT/.tools/zig-xtensa"
 ZIG_URL=${ZIG_URL:-https://github.com/kassane/zig-espressif-bootstrap/releases/download/0.16.0-xtensa/zig-relsafe-x86_64-linux-musl-baseline.tar.xz}
 
