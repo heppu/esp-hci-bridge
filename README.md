@@ -72,7 +72,10 @@ echo https://heppu.github.io/esp-hci-bridge/alpine | sudo tee -a /etc/apk/reposi
 sudo apk add hcibridge
 ```
 
-Plain package files are on the release page as well.
+Plain package files are on the release page as well, next to a `PKGBUILD` for
+Arch, an `APKBUILD` (needs Alpine edge for its Zig), and a Void template that
+fetches its own Zig. Every release builds all three the way their distro does
+before it is published.
 
 Arch has a `PKGBUILD` and Void a template on the release page. The package
 installs a background service that starts on boot and finds boards on its own.
