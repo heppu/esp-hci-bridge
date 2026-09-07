@@ -37,7 +37,9 @@ docker run --rm -v "$DIR:/in:ro" archlinux:latest bash -euc '
   cp /in/hcibridge-x86_64-linux "/bb/hcibridge-$v-x86_64"
   chown -R b /bb
   su b -c "cd /bb && makepkg --noconfirm >/dev/null 2>&1" || su b -c "cd /bb && makepkg --noconfirm 2>&1 | tail -5"
-  pacman -U --noconfirm /bb/hcibridge-bin-[0-9]*-x86_64.pkg.tar.zst >/dev/null 2>&1
+  # --noconfirm answers no to replacing the conflicting source package
+  pacman -R --noconfirm hcibridge >/dev/null 2>&1
+  pacman -U --noconfirm /bb/hcibridge-bin-[0-9]*-x86_64.pkg.tar.zst 2>&1 | tail -n 2
   echo "installed-bin: $(hcibridge --version)"' | check_bin
 # The same package under a real systemd, CI only: privileged systemd
 # containers are not safe on a workstation.
