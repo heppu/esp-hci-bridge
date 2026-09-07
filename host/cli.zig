@@ -6,6 +6,7 @@ const disc = @import("discovery");
 const auth = @import("auth");
 const httpc = @import("httpc.zig");
 const release = @import("release.zig");
+const ui = @import("ui.zig");
 const config = @import("config.zig");
 const settings = @import("settings.zig");
 const X25519 = std.crypto.dh.X25519;
@@ -174,9 +175,10 @@ pub fn list(io: Io, gpa: std.mem.Allocator, discovery_port: u16, window_ms: u32)
 }
 
 pub fn status(io: Io, gpa: std.mem.Allocator, ip: []const u8) !u8 {
+    var u = ui.Ui.init(io);
     const addr: Io.net.IpAddress = .{ .ip4 = try Io.net.Ip4Address.parse(ip, 80) };
     var r = httpc.get(io, gpa, &addr, "/") catch |err| {
-        log.err("cannot reach {s}: {s}", .{ ip, @errorName(err) });
+        u.fail("cannot reach {s}: {s}", .{ ip, @errorName(err) }, "", .{});
         return 1;
     };
     defer r.deinit(gpa);
@@ -219,35 +221,75 @@ fn authHeaders(psk: *const auth.Psk, method: []const u8, path: []const u8, nonce
     return std.fmt.bufPrint(out, "X-Bridge-Auth: {s}", .{&mac}) catch unreachable;
 }
 
-fn updateOne(io: Io, gpa: std.mem.Allocator, addr: *const Io.net.IpAddress, image: []const u8, keys: *const settings.Settings) bool {
+fn onUpload(ctx: *anyopaque, sent: usize) void {
+    const bar: *ui.Progress = @ptrCast(@alignCast(ctx));
+    bar.update(sent);
+}
+
+fn updateOne(io: Io, gpa: std.mem.Allocator, u: *ui.Ui, addr: *const Io.net.IpAddress, image: []const u8, keys: *const settings.Settings) bool {
     var bd: [17]u8 = undefined;
+    var ipb: [48]u8 = undefined;
+    const ip = ui.ipOf(addr, &ipb);
+    u.step("Board {s}", .{ip});
     const info = boardInfo(io, gpa, addr, &bd) catch |err| {
-        log.err("cannot query {f}: {s}", .{ addr.*, @errorName(err) });
+        u.fail("board {s} did not answer: {s}", .{ ip, ui.explain(err) }, "is it powered and on this network? `hcibridge list` shows what is visible", .{});
         return false;
     };
+    u.done("{s}, {s}, running {s}", .{ info.bdaddr, info.board() orelse "unknown board type", info.version() });
     // Firmware before v0.10 reports no claim state and takes unauthenticated
     // uploads, which is the only way to move such a board onto keyed firmware.
     var hbuf: [160]u8 = undefined;
     var hdr: ?[]const u8 = null;
     if (info.claimed != null) {
         const psk = settings.lookupPsk(keys.psk, info.bdaddr) orelse {
-            log.err("no key for {s} ({f}): {s}", .{ info.bdaddr, addr.*, noKeyHint() });
+            u.fail("no key for {s}", .{info.bdaddr}, "{s}", .{noKeyHint()});
             return false;
         };
         hdr = authHeaders(&psk, "POST", "/ota", info.nonce, image, &hbuf);
-    } else log.warn("{f} runs pre-key firmware, sending unauthenticated update", .{addr.*});
-    log.info("updating {f} ({s}), {d} bytes", .{ addr.*, info.bdaddr, image.len });
-    var r = httpc.postH(io, gpa, addr, "/ota", image, hdr) catch |err| {
-        log.err("  ota failed: {s}", .{@errorName(err)});
+    } else u.warn("{s} runs firmware from before keys existed, sending the update unauthenticated", .{ip});
+    var bar = u.progress("Uploading to {s}", .{ip}, image.len);
+    var r = httpc.postProgress(io, gpa, addr, "/ota", image, hdr, onUpload, @ptrCast(&bar)) catch |err| {
+        bar.finish(0);
+        u.fail("upload to {s} failed: {s}", .{ ip, ui.explain(err) }, "", .{});
         return false;
     };
     defer r.deinit(gpa);
+    bar.finish(image.len);
     if (r.status != 200) {
-        log.err("  ota rejected: HTTP {d} {s}", .{ r.status, std.mem.trim(u8, r.body, " \r\n") });
+        const hint: []const u8 = switch (r.status) {
+            401, 403 => "the key on this PC does not match the board, run `hcibridge claim` again or check /etc/hcibridge/config.d",
+            413 => "the image is larger than the board's firmware partition",
+            else => "",
+        };
+        u.fail("board {s} rejected the image: HTTP {d} {s}", .{ ip, r.status, std.mem.trim(u8, r.body, " \r\n") }, "{s}", .{hint});
         return false;
     }
-    log.info("  sent, board rebooting", .{});
+    u.info("Board accepted the image and is rebooting", .{});
+    waitForBoard(io, gpa, u, addr, info.version());
     return true;
+}
+
+/// Polls the board after an OTA until it answers again, then says what it runs.
+fn waitForBoard(io: Io, gpa: std.mem.Allocator, u: *ui.Ui, addr: *const Io.net.IpAddress, old_version: []const u8) void {
+    u.step("Waiting for it to come back", .{});
+    const start = Io.Clock.Timestamp.now(io, .awake);
+    io.sleep(Io.Duration.fromMilliseconds(3000), .awake) catch {};
+    while (start.untilNow(io).raw.toMilliseconds() < 90_000) {
+        var bd: [17]u8 = undefined;
+        if (boardInfo(io, gpa, addr, &bd)) |info| {
+            const secs = @divTrunc(start.untilNow(io).raw.toMilliseconds(), 1000);
+            u.done("up after {d} s, running {s}", .{ secs, info.version() });
+            if (std.mem.eql(u8, info.version(), old_version)) {
+                u.warn("same version as before, the new image may have failed to boot and rolled back", .{});
+                var ipb: [48]u8 = undefined;
+                u.info("  `hcibridge status {s}` shows prev_stage (how far it got) and reset (why it stopped)", .{ui.ipOf(addr, &ipb)});
+            }
+            return;
+        } else |_| {}
+        io.sleep(Io.Duration.fromMilliseconds(1000), .awake) catch {};
+    }
+    u.done("no answer after 90 s", .{});
+    u.warn("the board did not come back yet, check `hcibridge list` in a minute", .{});
 }
 
 /// Images for the latest release, fetched once per board preset.
@@ -257,11 +299,15 @@ const LatestImages = struct {
     cache: std.StringHashMap([]u8),
     gpa: std.mem.Allocator,
 
-    fn init(io: Io, gpa: std.mem.Allocator) !LatestImages {
+    fn init(io: Io, gpa: std.mem.Allocator, u: *ui.Ui) !LatestImages {
         var client: std.http.Client = .{ .allocator = gpa, .io = io };
         errdefer client.deinit();
-        log.info("checking the latest release of {s}", .{release.repo});
-        const rel = try release.latest(&client, gpa);
+        u.step("Checking the latest release of {s}", .{release.repo});
+        const rel = release.latest(&client, gpa) catch |err| {
+            u.done("failed", .{});
+            return err;
+        };
+        u.done("{s}", .{rel.tag});
         return .{ .client = client, .rel = rel, .cache = std.StringHashMap([]u8).init(gpa), .gpa = gpa };
     }
 
@@ -276,11 +322,11 @@ const LatestImages = struct {
         self.client.deinit();
     }
 
-    fn image(self: *LatestImages, board: []const u8) ![]const u8 {
+    fn image(self: *LatestImages, u: *ui.Ui, board: []const u8) ![]const u8 {
         if (self.cache.get(board)) |img| return img;
-        log.info("downloading {s} firmware for {s}", .{ self.rel.tag, board });
-        const img = try self.rel.image(&self.client, self.gpa, board);
+        const img = try self.rel.image(&self.client, self.gpa, board, u);
         errdefer self.gpa.free(img);
+        u.info("Checksum ok", .{});
         const key = try self.gpa.dupe(u8, board);
         errdefer self.gpa.free(key);
         try self.cache.put(key, img);
@@ -290,26 +336,38 @@ const LatestImages = struct {
 
 /// Picks the image for one board: the given file, or the latest release for
 /// the board's preset. Returns null when the board is already on that release.
-fn imageFor(io: Io, gpa: std.mem.Allocator, addr: *const Io.net.IpAddress, file_image: ?[]const u8, latest_images: *?LatestImages, board_override: ?[]const u8) !?[]const u8 {
+fn imageFor(io: Io, gpa: std.mem.Allocator, u: *ui.Ui, addr: *const Io.net.IpAddress, file_image: ?[]const u8, latest_images: *?LatestImages, board_override: ?[]const u8) !?[]const u8 {
     if (file_image) |img| return img;
     var bd: [17]u8 = undefined;
-    const info = try boardInfo(io, gpa, addr, &bd);
-    const board = board_override orelse info.board() orelse {
-        log.err("{f} runs firmware that does not say which board it is: pass --board <preset> or a file", .{addr.*});
-        return error.UnknownBoard;
+    var ipb: [48]u8 = undefined;
+    const ip = ui.ipOf(addr, &ipb);
+    const info = boardInfo(io, gpa, addr, &bd) catch |err| {
+        u.fail("board {s} did not answer: {s}", .{ ip, ui.explain(err) }, "is it powered and on this network? `hcibridge list` shows what is visible", .{});
+        return error.Reported;
     };
-    if (latest_images.* == null) latest_images.* = try LatestImages.init(io, gpa);
+    const board = board_override orelse info.board() orelse {
+        u.fail("{s} runs firmware that does not say which board it is", .{ip}, "pass --board <preset> (olimex-esp32-poe, wt32-eth01, generic-wifi) or a firmware file", .{});
+        return error.Reported;
+    };
+    if (latest_images.* == null) latest_images.* = LatestImages.init(io, gpa, u) catch |err| {
+        u.fail("could not reach the release page: {s}", .{ui.explain(err)}, "check the network, or pass a firmware file downloaded by other means", .{});
+        return error.Reported;
+    };
     const li = &latest_images.*.?;
     if (std.mem.eql(u8, info.version(), li.rel.tag)) {
-        log.info("{f} ({s}) already runs {s}", .{ addr.*, board, li.rel.tag });
+        u.info("{s} ({s}) already runs {s}, nothing to do", .{ ip, board, li.rel.tag });
         return null;
     }
-    return try li.image(board);
+    return li.image(u, board) catch |err| {
+        u.fail("could not fetch the {s} image for {s}: {s}", .{ li.rel.tag, board, ui.explain(err) }, "", .{});
+        return error.Reported;
+    };
 }
 
 pub fn update(io: Io, gpa: std.mem.Allocator, target: []const u8, path: ?[]const u8, board_override: ?[]const u8, discovery_port: u16, cfg_path: []const u8) !u8 {
+    var u = ui.Ui.init(io);
     const file_image: ?[]const u8 = if (path) |p| readFile(io, gpa, p) catch |err| {
-        log.err("cannot read {s}: {s}", .{ p, @errorName(err) });
+        u.fail("cannot read {s}: {s}", .{ p, ui.explain(err) }, "", .{});
         return 1;
     } else null;
     defer if (file_image) |img| gpa.free(img);
@@ -319,38 +377,34 @@ pub fn update(io: Io, gpa: std.mem.Allocator, target: []const u8, path: ?[]const
     defer keys.deinit();
 
     if (std.mem.eql(u8, target, "all")) {
+        u.step("Looking for boards", .{});
         const bridges = try collect(io, gpa, discovery_port, 2500);
         defer gpa.free(bridges);
+        u.done("{d} found", .{bridges.len});
         if (bridges.len == 0) {
-            log.err("no bridges found to update", .{});
+            u.fail("no boards answered on the network", .{}, "`hcibridge list` uses the same discovery, boards must be on this LAN and powered", .{});
             return 1;
         }
         var ok: usize = 0;
         for (bridges) |*b| {
             var a = b.addr;
             a.setPort(80);
-            const img = imageFor(io, gpa, &a, file_image, &latest_images, board_override) catch |err| {
-                log.err("{f}: {s}", .{ a, @errorName(err) });
-                continue;
-            } orelse {
+            const img = (imageFor(io, gpa, &u, &a, file_image, &latest_images, board_override) catch continue) orelse {
                 ok += 1;
                 continue;
             };
-            if (updateOne(io, gpa, &a, img, &keys)) ok += 1;
+            if (updateOne(io, gpa, &u, &a, img, &keys)) ok += 1;
         }
-        log.info("{d}/{d} bridges up to date", .{ ok, bridges.len });
+        u.info("{d} of {d} boards up to date", .{ ok, bridges.len });
         return if (ok == bridges.len) 0 else 1;
     }
 
     const addr: Io.net.IpAddress = .{ .ip4 = Io.net.Ip4Address.parse(target, 80) catch {
-        log.err("target must be an IPv4 address or 'all'", .{});
+        u.fail("{s} is not an IPv4 address", .{target}, "give a board address from `hcibridge list`, or `all`", .{});
         return 2;
     } };
-    const img = imageFor(io, gpa, &addr, file_image, &latest_images, board_override) catch |err| {
-        log.err("{f}: {s}", .{ addr, @errorName(err) });
-        return 1;
-    } orelse return 0;
-    return if (updateOne(io, gpa, &addr, img, &keys)) 0 else 1;
+    const img = (imageFor(io, gpa, &u, &addr, file_image, &latest_images, board_override) catch return 1) orelse return 0;
+    return if (updateOne(io, gpa, &u, &addr, img, &keys)) 0 else 1;
 }
 
 fn dropinPath(cfg_path: []const u8, bdaddr: []const u8, buf: *[512]u8) ![]const u8 {
@@ -363,8 +417,9 @@ fn dropinPath(cfg_path: []const u8, bdaddr: []const u8, buf: *[512]u8) ![]const 
 /// board's next announce and drops its link. The board itself keeps thinking
 /// it is claimed, which only matters if it should pair with another PC.
 pub fn revoke(io: Io, gpa: std.mem.Allocator, bdaddr: []const u8, cfg_path: []const u8) !u8 {
+    var u = ui.Ui.init(io);
     if (bdaddr.len != 17) {
-        log.err("expected a Bluetooth address like a0:a3:b3:2f:61:1e, got {s}", .{bdaddr});
+        u.fail("expected a Bluetooth address like a0:a3:b3:2f:61:1e, got {s}", .{bdaddr}, "", .{});
         return 2;
     }
     var path_buf: [512]u8 = undefined;
@@ -374,24 +429,25 @@ pub fn revoke(io: Io, gpa: std.mem.Allocator, bdaddr: []const u8, cfg_path: []co
             var keys = try loadKeys(io, gpa, cfg_path);
             defer keys.deinit();
             if (settings.lookupPsk(keys.psk, bdaddr) != null) {
-                log.err("{s} has no drop-in at {s} but a key is set elsewhere: remove the `psk = {s}=...` line from {s} or its .d files by hand", .{ bdaddr, dropin, bdaddr, cfg_path });
+                u.fail("{s} has no drop-in at {s} but a key is set elsewhere: remove the `psk = {s}=...` line from {s} or its .d files by hand", .{ bdaddr, dropin, bdaddr, cfg_path }, "", .{});
                 return 1;
             }
-            log.info("{s} is not claimed on this PC, nothing to do", .{bdaddr});
+            u.info("{s} is not claimed on this PC, nothing to do", .{bdaddr});
             return 0;
         },
         else => {
-            log.err("cannot remove {s}: {s}", .{ dropin, @errorName(err) });
+            u.fail("cannot remove {s}: {s}", .{ dropin, @errorName(err) }, "", .{});
             return 1;
         },
     };
-    log.info("revoked {s}: removed {s}; the daemon drops the board on its next announce", .{ bdaddr, dropin });
+    u.info("revoked {s}: removed {s}; the daemon drops the board on its next announce", .{ bdaddr, dropin });
     return 0;
 }
 
 pub fn reboot(io: Io, gpa: std.mem.Allocator, ip: []const u8, cfg_path: []const u8) !u8 {
+    var u = ui.Ui.init(io);
     const addr: Io.net.IpAddress = .{ .ip4 = Io.net.Ip4Address.parse(ip, httpc.http_port) catch {
-        log.err("bad ip: {s}", .{ip});
+        u.fail("bad ip: {s}", .{ip}, "", .{});
         return 2;
     } };
     var keys = try loadKeys(io, gpa, cfg_path);
@@ -399,7 +455,7 @@ pub fn reboot(io: Io, gpa: std.mem.Allocator, ip: []const u8, cfg_path: []const 
     var bd: [17]u8 = undefined;
     const info = try boardInfo(io, gpa, &addr, &bd);
     const psk = settings.lookupPsk(keys.psk, info.bdaddr) orelse {
-        log.err("no key for {s}: {s}", .{ info.bdaddr, noKeyHint() });
+        u.fail("no key for {s}", .{info.bdaddr}, "{s}", .{noKeyHint()});
         return 1;
     };
     var hbuf: [160]u8 = undefined;
@@ -407,18 +463,19 @@ pub fn reboot(io: Io, gpa: std.mem.Allocator, ip: []const u8, cfg_path: []const 
     var r = try httpc.postH(io, gpa, &addr, "/reboot", "", hdr);
     defer r.deinit(gpa);
     if (r.status != 200) {
-        log.err("reboot rejected: HTTP {d}", .{r.status});
+        u.fail("reboot rejected: HTTP {d}", .{r.status}, "", .{});
         return 1;
     }
-    log.info("{s} rebooting", .{ip});
+    u.info("{s} rebooting", .{ip});
     return 0;
 }
 
 /// Tells a board to forget its key and reboot unclaimed, then removes the key
 /// on this side too. Requires the current key, so only the owning PC can do it.
 pub fn unclaim(io: Io, gpa: std.mem.Allocator, ip: []const u8, cfg_path: []const u8) !u8 {
+    var u = ui.Ui.init(io);
     const addr: Io.net.IpAddress = .{ .ip4 = Io.net.Ip4Address.parse(ip, httpc.http_port) catch {
-        log.err("bad ip: {s}", .{ip});
+        u.fail("bad ip: {s}", .{ip}, "", .{});
         return 2;
     } };
     var keys = try loadKeys(io, gpa, cfg_path);
@@ -426,11 +483,11 @@ pub fn unclaim(io: Io, gpa: std.mem.Allocator, ip: []const u8, cfg_path: []const
     var bd: [17]u8 = undefined;
     const info = try boardInfo(io, gpa, &addr, &bd);
     if (info.claimed == false) {
-        log.info("{s} ({s}) is not claimed by anyone", .{ ip, info.bdaddr });
+        u.info("{s} ({s}) is not claimed by anyone", .{ ip, info.bdaddr });
         return revoke(io, gpa, info.bdaddr, cfg_path);
     }
     const psk = settings.lookupPsk(keys.psk, info.bdaddr) orelse {
-        log.err("no key for {s}: this PC did not claim it, so it cannot release it (erase the board over USB instead)", .{info.bdaddr});
+        u.fail("no key for {s}: this PC did not claim it, so it cannot release it (erase the board over USB instead)", .{info.bdaddr}, "", .{});
         return 1;
     };
     var hbuf: [160]u8 = undefined;
@@ -438,14 +495,14 @@ pub fn unclaim(io: Io, gpa: std.mem.Allocator, ip: []const u8, cfg_path: []const
     var r = try httpc.postH(io, gpa, &addr, "/unclaim", "", hdr);
     defer r.deinit(gpa);
     if (r.status == 404) {
-        log.err("{s} runs firmware without unclaim support: run `hcibridge update {s} <esp-hci-bridge-<board>.bin>` first", .{ ip, ip });
+        u.fail("{s} runs firmware without unclaim support: run `hcibridge update {s} <esp-hci-bridge-<board>.bin>` first", .{ ip, ip }, "", .{});
         return 1;
     }
     if (r.status != 200) {
-        log.err("unclaim rejected: HTTP {d} {s}", .{ r.status, std.mem.trim(u8, r.body, " \r\n") });
+        u.fail("unclaim rejected: HTTP {d} {s}", .{ r.status, std.mem.trim(u8, r.body, " \r\n") }, "", .{});
         return 1;
     }
-    log.info("{s} ({s}) forgot its key and is rebooting unclaimed", .{ ip, info.bdaddr });
+    u.info("{s} ({s}) forgot its key and is rebooting unclaimed", .{ ip, info.bdaddr });
     return revoke(io, gpa, info.bdaddr, cfg_path);
 }
 
@@ -453,18 +510,19 @@ pub fn unclaim(io: Io, gpa: std.mem.Allocator, ip: []const u8, cfg_path: []const
 /// written as a drop-in under <config>.d/. First claim wins; re-keying needs
 /// a factory reset of the board.
 pub fn claim(io: Io, gpa: std.mem.Allocator, ip: []const u8, cfg_path: []const u8) !u8 {
+    var u = ui.Ui.init(io);
     const addr: Io.net.IpAddress = .{ .ip4 = Io.net.Ip4Address.parse(ip, httpc.http_port) catch {
-        log.err("bad ip: {s}", .{ip});
+        u.fail("bad ip: {s}", .{ip}, "", .{});
         return 2;
     } };
     var bd: [17]u8 = undefined;
     const info = try boardInfo(io, gpa, &addr, &bd);
     const claimed = info.claimed orelse {
-        log.err("{s} ({s}) runs firmware without key support: update it first.", .{ ip, info.bdaddr });
+        u.fail("{s} ({s}) runs firmware without key support: update it first.", .{ ip, info.bdaddr }, "", .{});
         return 1;
     };
     if (claimed) {
-        log.err("{s} ({s}) is already claimed. To re-key it, factory-reset the board first.", .{ ip, info.bdaddr });
+        u.fail("{s} ({s}) is already claimed. To re-key it, factory-reset the board first.", .{ ip, info.bdaddr }, "", .{});
         return 1;
     }
 
@@ -473,17 +531,17 @@ pub fn claim(io: Io, gpa: std.mem.Allocator, ip: []const u8, cfg_path: []const u
     var r = try httpc.postBinary(io, gpa, &addr, "/claim", &pk_hex);
     defer r.deinit(gpa);
     if (r.status != 200) {
-        log.err("claim rejected: HTTP {d} {s}", .{ r.status, std.mem.trim(u8, r.body, " \r\n") });
+        u.fail("claim rejected: HTTP {d} {s}", .{ r.status, std.mem.trim(u8, r.body, " \r\n") }, "", .{});
         return 1;
     }
     const board_hex = std.mem.trim(u8, r.body, " \r\n");
     var board_pk: [32]u8 = undefined;
     if (board_hex.len != board_pk.len * 2) {
-        log.err("bad board public key in reply: {d} chars, want 64", .{board_hex.len});
+        u.fail("bad board public key in reply: {d} chars, want 64", .{board_hex.len}, "", .{});
         return 1;
     }
     _ = std.fmt.hexToBytes(&board_pk, board_hex) catch {
-        log.err("bad board public key in reply", .{});
+        u.fail("bad board public key in reply", .{}, "", .{});
         return 1;
     };
     const psk = try auth.derivePsk(kp.secret_key, board_pk);
@@ -496,10 +554,10 @@ pub fn claim(io: Io, gpa: std.mem.Allocator, ip: []const u8, cfg_path: []const u
     const dropin = try dropinPath(cfg_path, info.bdaddr, &path_buf);
 
     if (writeFile(io, dropin, line)) {
-        log.info("claimed {s} ({s}); key saved to {s}", .{ ip, info.bdaddr, dropin });
-        log.info("the running daemon picks the key up on the board's next announce", .{});
+        u.info("claimed {s} ({s}); key saved to {s}", .{ ip, info.bdaddr, dropin });
+        u.info("the running daemon picks the key up on the board's next announce", .{});
     } else |err| {
-        log.warn("claimed {s} ({s}) but could not write {s}: {s}", .{ ip, info.bdaddr, dropin, @errorName(err) });
+        u.warn("claimed {s} ({s}) but could not write {s}: {s}", .{ ip, info.bdaddr, dropin, @errorName(err) });
         var obuf: [256]u8 = undefined;
         var out = Io.File.stdout().writer(io, &obuf);
         try out.interface.print("# add this line to {s} (or a .d drop-in):\n{s}", .{ cfg_path, line });

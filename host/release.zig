@@ -3,6 +3,7 @@ const std = @import("std");
 const Io = std.Io;
 
 const log = std.log;
+const ui = @import("ui.zig");
 
 pub const repo = "heppu/esp-hci-bridge";
 const latest_url = "https://github.com/" ++ repo ++ "/releases/latest";
@@ -27,13 +28,13 @@ pub const Latest = struct {
     }
 
     /// Downloads and hash-checks the image for one board preset. Caller frees.
-    pub fn image(self: *Latest, client: *std.http.Client, gpa: std.mem.Allocator, board: []const u8) ![]u8 {
+    pub fn image(self: *Latest, client: *std.http.Client, gpa: std.mem.Allocator, board: []const u8, out: ?*ui.Ui) ![]u8 {
         var nbuf: [128]u8 = undefined;
         const name = try imageName(board, &nbuf);
         const expected = sumFor(self.sums, name) orelse return error.NoSuchBoardImage;
         var url_buf: [256]u8 = undefined;
         const url = try std.fmt.bufPrint(&url_buf, "{s}{s}/{s}", .{ download_base, self.tag, name });
-        const body = try get(client, gpa, url);
+        const body = try getShow(client, gpa, url, out, name);
         errdefer gpa.free(body);
         var digest: [32]u8 = undefined;
         std.crypto.hash.sha2.Sha256.hash(body, &digest, .{});
@@ -75,12 +76,16 @@ fn latestTag(client: *std.http.Client, gpa: std.mem.Allocator) ![]const u8 {
 }
 
 fn get(client: *std.http.Client, gpa: std.mem.Allocator, url: []const u8) ![]u8 {
-    return retry(getOnce, .{ client, gpa, url });
+    return retry(getOnce, .{ client, gpa, url, @as(?*ui.Ui, null), @as([]const u8, "") });
+}
+
+fn getShow(client: *std.http.Client, gpa: std.mem.Allocator, url: []const u8, out: ?*ui.Ui, label: []const u8) ![]u8 {
+    return retry(getOnce, .{ client, gpa, url, out, label });
 }
 
 /// Follows redirects by hand: the client's own redirect path re-encodes the
 /// signed asset URLs GitHub hands out and the CDN answers 400 to the result.
-fn getOnce(client: *std.http.Client, gpa: std.mem.Allocator, url: []const u8) ![]u8 {
+fn getOnce(client: *std.http.Client, gpa: std.mem.Allocator, url: []const u8, out: ?*ui.Ui, label: []const u8) ![]u8 {
     var loc_buf: [4096]u8 = undefined;
     var cur: []const u8 = url;
     var hops: usize = 0;
@@ -111,11 +116,20 @@ fn getOnce(client: *std.http.Client, gpa: std.mem.Allocator, url: []const u8) ![
         }
         var tbuf: [16 * 1024]u8 = undefined;
         const body = res.reader(&tbuf);
-        var out: Io.Writer.Allocating = .init(gpa);
-        defer out.deinit();
-        _ = body.streamRemaining(&out.writer) catch return error.ReadFailed;
-        if (out.written().len > max_body) return error.ResponseTooLarge;
-        return out.toOwnedSlice();
+        const total: usize = @intCast(res.head.content_length orelse 0);
+        var bar: ?ui.Progress = if (out) |u| u.progress("Downloading {s}", .{label}, total) else null;
+        var acc: Io.Writer.Allocating = .init(gpa);
+        defer acc.deinit();
+        while (true) {
+            var chunk: [16 * 1024]u8 = undefined;
+            const n = body.readSliceShort(&chunk) catch return error.ReadFailed;
+            if (n == 0) break;
+            acc.writer.writeAll(chunk[0..n]) catch return error.OutOfMemory;
+            if (acc.written().len > max_body) return error.ResponseTooLarge;
+            if (bar) |*b| b.update(acc.written().len);
+        }
+        if (bar) |*b| b.finish(acc.written().len);
+        return acc.toOwnedSlice();
     }
     return error.TooManyRedirects;
 }
