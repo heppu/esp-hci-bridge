@@ -108,6 +108,16 @@ vectors that both must match.
 | `web/` | the browser flasher page |
 | `scripts/` | firmware build wrapper, site assembly, service installer |
 
+## Package repository
+
+Alpine packages are signed with `packaging/keys/heppu-esp-hci-bridge.rsa`
+(private, gitignored, also the `APK_SIGNING_KEY` secret) and the public half is
+committed next to it and published at `/alpine/` on the site together with a
+signed `APKINDEX.tar.gz` per architecture. The release job builds the index in
+an Alpine container and signs it the way `abuild-sign` does. Losing the
+private key means users have to fetch and trust a new public key, so keep a
+copy outside CI, like the firmware key.
+
 ## Releasing
 
 Push a `v*` tag on a commit that is on `main`. The workflow refuses tags that

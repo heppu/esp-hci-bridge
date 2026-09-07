@@ -73,7 +73,7 @@ jobs:
           path: fw/
 
   site:
-    needs: firmware
+    needs: [firmware, cli]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -82,12 +82,17 @@ jobs:
           pattern: fw-*
           path: fw
           merge-multiple: true
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: apk-repo
+          path: repo
       - name: Assemble site for all boards
         run: |
           scripts/make-site.sh "${GITHUB_REF_NAME}" _site \
             olimex-esp32-poe=fw/olimex-esp32-poe \
             wt32-eth01=fw/wt32-eth01 \
             generic-wifi=fw/generic-wifi
+          cp -r repo/alpine _site/alpine
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: site
@@ -104,6 +109,12 @@ jobs:
       - run: zig build release -Dversion="${GITHUB_REF_NAME}"
       - name: Generate man page and completions
         run: zig build gen -Dversion="${GITHUB_REF_NAME}"
+      - name: Package signing key
+        env:
+          KEY: ${{ secrets.APK_SIGNING_KEY }}
+        run: |
+          test -n "$KEY" || { echo "APK_SIGNING_KEY secret missing: refusing to release unsigned packages"; exit 1; }
+          printf '%s\n' "$KEY" > packaging/keys/heppu-esp-hci-bridge.rsa
       - name: Install nfpm
         run: |
           NV=2.44.0
@@ -137,10 +148,36 @@ jobs:
           sed -e "s/@PKGVER@/$VER/" -e "s/@SHA512@/$SHA512/" packaging/APKBUILD.tmpl > out/APKBUILD
           sed -e "s/@PKGVER@/$VER/" -e "s/@SHA256@/$SHA/" packaging/void-template.tmpl > out/void-template
           ls -1 out/
+      - name: Build the Alpine repository
+        run: |
+          set -eu
+          VER="${GITHUB_REF_NAME#v}"
+          KEY=heppu-esp-hci-bridge
+          mkdir -p repo/alpine
+          cp packaging/keys/$KEY.rsa.pub repo/alpine/
+          for arch in x86_64 aarch64 armv7; do
+            mkdir -p "repo/alpine/$arch"
+            cp "out/hcibridge_${VER}_${arch}.apk" "repo/alpine/$arch/"
+          done
+          docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD/repo/alpine:/r" -v "$PWD/packaging/keys:/keys:ro" alpine:3.22 \
+            sh -c 'for d in /r/*/; do cd "$d" && apk index --keys-dir /keys -o unsigned.tar.gz *.apk; done'
+          # abuild-sign without abuild: RSA-SHA1 over the index, prepended as its own tar
+          for d in repo/alpine/*/; do
+            ( cd "$d"
+              openssl dgst -sha1 -sign "$OLDPWD/packaging/keys/$KEY.rsa" -out ".SIGN.RSA.$KEY.rsa.pub" unsigned.tar.gz
+              tar -c --owner=0 --group=0 --numeric-owner ".SIGN.RSA.$KEY.rsa.pub" | head -c 1536 | gzip -9 > sig.tar.gz
+              cat sig.tar.gz unsigned.tar.gz > APKINDEX.tar.gz
+              rm -f sig.tar.gz unsigned.tar.gz ".SIGN.RSA.$KEY.rsa.pub" )
+          done
+          find repo -type f | sort
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: cli
           path: out/
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: apk-repo
+          path: repo/
 
   release:
     needs: [site, cli]

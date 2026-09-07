@@ -53,6 +53,7 @@ jobs:
           NV=2.44.0
           curl -sSL "https://github.com/goreleaser/nfpm/releases/download/v${NV}/nfpm_${NV}_Linux_x86_64.tar.gz" | tar xz nfpm
           mkdir -p dist && cp zig-out/bin/hcibridge dist/hcibridge
+          openssl genrsa -out packaging/keys/heppu-esp-hci-bridge.rsa 2048 2>/dev/null
           for fmt in deb rpm apk; do PKG_ARCH=amd64 VERSION=0.0.0 ./nfpm pkg -f packaging/nfpm.yaml -p $fmt -t .; done
           ls -1 *.deb *.rpm *.apk
 

@@ -47,9 +47,16 @@ Download the package for your distro from the
 [latest release](https://github.com/heppu/esp-hci-bridge/releases/latest):
 
 ```sh
-sudo dpkg -i hcibridge_*_amd64.deb                      # Debian, Ubuntu
-sudo rpm -i hcibridge-*.x86_64.rpm                      # Fedora, RHEL
-sudo apk add --allow-untrusted hcibridge_*_x86_64.apk   # Alpine
+sudo dpkg -i hcibridge_*_amd64.deb      # Debian, Ubuntu
+sudo rpm -i hcibridge-*.x86_64.rpm      # Fedora, RHEL
+```
+
+Alpine has a package repository, so `apk upgrade` keeps the tool current:
+
+```sh
+sudo wget -O /etc/apk/keys/heppu-esp-hci-bridge.rsa.pub https://heppu.github.io/esp-hci-bridge/alpine/heppu-esp-hci-bridge.rsa.pub
+echo https://heppu.github.io/esp-hci-bridge/alpine | sudo tee -a /etc/apk/repositories
+sudo apk add hcibridge
 ```
 
 Arch has a `PKGBUILD` and Void a template on the release page. The package
