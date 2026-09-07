@@ -69,8 +69,14 @@ cp "$KEYS/$AKEY.rsa.pub" "$APK/"
 for f in "$PKGS"/hcibridge_*_*.apk; do
     [ -f "$f" ] || continue
     base=$(basename "$f" .apk)
-    ver=${base#hcibridge_}; ver=${ver%_*}
-    arch=${base##*_}
+    # hcibridge_<ver>_<arch>.apk, and x86_64 has its own underscore
+    case "$base" in
+        *_x86_64) arch=x86_64 ;;
+        *_aarch64) arch=aarch64 ;;
+        *_armv7) arch=armv7 ;;
+        *) echo "unknown apk arch in $base" >&2; exit 1 ;;
+    esac
+    ver=${base#hcibridge_}; ver=${ver%_$arch}
     mkdir -p "$APK/$arch"
     # apk fetches <name>-<version>.apk, whatever the file was called at build time
     cp "$f" "$APK/$arch/hcibridge-$ver.apk"

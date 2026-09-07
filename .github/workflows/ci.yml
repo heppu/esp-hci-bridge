@@ -65,6 +65,7 @@ jobs:
           tar xzf nfpm.tgz nfpm && rm nfpm.tgz
           mkdir -p dist && cp zig-out/bin/hcibridge dist/hcibridge
           openssl genrsa -out packaging/keys/heppu-esp-hci-bridge.rsa 2048 2>/dev/null
+          openssl rsa -in packaging/keys/heppu-esp-hci-bridge.rsa -pubout -out packaging/keys/heppu-esp-hci-bridge.rsa.pub 2>/dev/null
           gpg --batch --quick-gen-key --passphrase '' ci@example.invalid rsa2048 sign 0 2>/dev/null
           gpg --batch --armor --export-secret-keys ci@example.invalid > packaging/keys/hcibridge.gpg
           mkdir -p pkgs
