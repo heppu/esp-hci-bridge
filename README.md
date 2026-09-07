@@ -112,8 +112,10 @@ Arch, an `APKBUILD` (needs Alpine edge for its Zig), and a Void template that
 fetches its own Zig. Every release builds all three the way their distro does
 before it is published.
 
-Arch has a `PKGBUILD` and Void a template on the release page. The package
-installs a background service that starts on boot and finds boards on its own.
+Arch: `yay -S hcibridge` from the AUR, then `sudo systemctl enable --now
+hcibridge`, Arch packages do not start services on their own. Every other
+package installs a background service that starts on boot and finds boards on
+its own.
 
 ### 3. Claim the board
 
