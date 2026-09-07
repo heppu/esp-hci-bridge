@@ -61,6 +61,10 @@ contents:
     type: config|noreplace
     packager: apk
 
+rpm:
+  signature:
+    key_file: packaging/keys/hcibridge.gpg
+
 apk:
   signature:
     key_file: packaging/keys/heppu-esp-hci-bridge.rsa
