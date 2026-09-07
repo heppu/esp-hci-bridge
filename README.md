@@ -27,6 +27,39 @@ board.
 - A Linux PC with BlueZ. Any mainstream distro qualifies.
 - Both on the same network.
 
+## Why this and not...
+
+**USB/IP with a Bluetooth dongle.** That needs a computer at the far end,
+running Linux, `usbipd`, and a dongle. This is a 20 euro board with no
+operating system, on PoE, that boots in two seconds. USB/IP also ships every
+USB transaction over the network: a dongle is polled every millisecond, each
+poll becomes a round trip, so inputs jitter and things like SCO audio break.
+Here a button press is one Bluetooth packet, one hop. And when a USB/IP
+connection drops, the dongle is unplugged as far as the kernel is concerned,
+the adapter vanishes from BlueZ, and someone has to run `usbip attach` again.
+Here the daemon reconnects, pairings live on the board, devices come back on
+their own. USB/IP does win on radios: any dongle works, including Bluetooth
+5.3 ones. The ESP32 is Bluetooth 4.2 dual mode, fine for controllers,
+keyboards, mice, and headphones.
+
+**An ESPHome Bluetooth proxy.** Different tool. That is a BLE relay for Home
+Assistant: the board forwards advertisements and GATT reads, only Home
+Assistant can use it, only for BLE, only through its integrations. This puts a
+whole Bluetooth controller into the Linux kernel, classic and BLE, so every
+program sees a normal adapter. Home Assistant on the same machine can use it
+too, as a full adapter in the room where the sensors are.
+
+**Streaming to the TV, Steam Link and friends.** That moves the video and
+encodes it, with the latency and quality that brings. This keeps the PC
+driving the display over a cable at full quality and only moves the
+Bluetooth side to where you sit. If you already have a long HDMI run, this
+completes it.
+
+**A USB extender or a long cable for the dongle.** Works for one room on a
+dedicated cable. This runs over the network you already have, through
+switches, to as many rooms as you put boards in, with the PC unaware anything
+is remote.
+
 ## Setup
 
 ### 1. Flash the board
