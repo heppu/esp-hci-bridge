@@ -84,6 +84,14 @@ Download the package for your distro from the
 Every distro gets a signed package repository, so the normal upgrade command
 keeps the tool current afterwards.
 
+Alpine:
+
+```sh
+sudo wget -O /etc/apk/keys/heppu-esp-hci-bridge.rsa.pub https://heppu.github.io/esp-hci-bridge/alpine/heppu-esp-hci-bridge.rsa.pub
+echo https://heppu.github.io/esp-hci-bridge/alpine | sudo tee -a /etc/apk/repositories
+sudo apk add hcibridge
+```
+
 Debian, Ubuntu:
 
 ```sh
@@ -97,14 +105,6 @@ Fedora, RHEL:
 ```sh
 sudo curl -fsSLo /etc/yum.repos.d/hcibridge.repo https://heppu.github.io/esp-hci-bridge/rpm/hcibridge.repo
 sudo dnf install hcibridge
-```
-
-Alpine:
-
-```sh
-sudo wget -O /etc/apk/keys/heppu-esp-hci-bridge.rsa.pub https://heppu.github.io/esp-hci-bridge/alpine/heppu-esp-hci-bridge.rsa.pub
-echo https://heppu.github.io/esp-hci-bridge/alpine | sudo tee -a /etc/apk/repositories
-sudo apk add hcibridge
 ```
 
 Plain package files are on the release page as well, next to a `PKGBUILD` for
