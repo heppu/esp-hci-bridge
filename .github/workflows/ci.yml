@@ -47,7 +47,7 @@ jobs:
           version: 0.16.0
       - run: zig fmt --check build.zig common host firmware/main
       - run: zig build test --summary all
-      - run: zig build -Doptimize=ReleaseSafe
+      - run: zig build -Doptimize=ReleaseSafe -Dversion=v99.0.0
       - run: zig build release
       - run: zig build gen
       - name: Check generated completions
