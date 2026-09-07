@@ -60,6 +60,9 @@ fi
 echo "== fedora"
 if boot vr-fedora fedora:latest sh -c 'dnf -q install -y systemd >/dev/null 2>&1 && exec /sbin/init'; then
 docker exec vr-fedora sh -euc "
+  # systemd-resolved's stub resolver does not work inside the container
+  systemctl disable --now systemd-resolved >/dev/null 2>&1 || true
+  rm -f /etc/resolv.conf && printf 'nameserver 1.1.1.1\\nnameserver 8.8.8.8\\n' > /etc/resolv.conf
   if curl -sf -o /etc/yum.repos.d/hcibridge-live.repo $LIVE/rpm/hcibridge.repo; then
     sed -i 's/^\[hcibridge\]/[hcibridge-live]/' /etc/yum.repos.d/hcibridge-live.repo
     dnf -q install -y hcibridge >/dev/null 2>&1 && echo \"previous: \$(hcibridge --version)\" || echo 'previous: none'
