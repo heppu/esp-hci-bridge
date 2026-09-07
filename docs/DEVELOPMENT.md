@@ -118,6 +118,13 @@ an Alpine container and signs it the way `abuild-sign` does. Losing the
 private key means users have to fetch and trust a new public key, so keep a
 copy outside CI, like the firmware key.
 
+## AUR
+
+`hcibridge` on the AUR builds from the release tarball with the `PKGBUILD` the
+release renders. The release workflow regenerates `.SRCINFO` in an Arch
+container and pushes both to `ssh://aur@aur.archlinux.org/hcibridge.git` with
+the `AUR_SSH_KEY` secret (the matching public key is on the AUR account).
+
 ## Releasing
 
 Push a `v*` tag on a commit that is on `main`. The workflow refuses tags that
