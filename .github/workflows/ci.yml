@@ -68,6 +68,7 @@ jobs:
           openssl rsa -in packaging/keys/heppu-esp-hci-bridge.rsa -pubout -out packaging/keys/heppu-esp-hci-bridge.rsa.pub 2>/dev/null
           gpg --batch --quick-gen-key --passphrase '' ci@example.invalid rsa2048 sign 0 2>/dev/null
           gpg --batch --armor --export-secret-keys ci@example.invalid > packaging/keys/hcibridge.gpg
+          gpg --batch --armor --export ci@example.invalid > packaging/keys/hcibridge.gpg.pub
           mkdir -p pkgs
           PKG_ARCH=amd64 VERSION=99.0.0 ./nfpm pkg -f packaging/nfpm.yaml -p deb -t pkgs/
           PKG_ARCH=x86_64 VERSION=99.0.0 ./nfpm pkg -f packaging/nfpm.yaml -p rpm -t pkgs/
