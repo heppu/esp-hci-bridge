@@ -157,7 +157,8 @@ jobs:
           cp packaging/keys/$KEY.rsa.pub repo/alpine/
           for arch in x86_64 aarch64 armv7; do
             mkdir -p "repo/alpine/$arch"
-            cp "out/hcibridge_${VER}_${arch}.apk" "repo/alpine/$arch/"
+            # apk fetches <name>-<version>.apk, whatever the file was called at build time
+            cp "out/hcibridge_${VER}_${arch}.apk" "repo/alpine/$arch/hcibridge-${VER}.apk"
           done
           docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD/repo/alpine:/r" -v "$PWD/packaging/keys:/keys:ro" alpine:3.22 \
             sh -c 'for d in /r/*/; do cd "$d" && apk index --keys-dir /keys -o unsigned.tar.gz *.apk; done'
