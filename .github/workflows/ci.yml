@@ -17,6 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       firmware: ${{ steps.f.outputs.firmware }}
+      packaging: ${{ steps.f.outputs.packaging }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3
@@ -28,8 +29,16 @@ jobs:
               - 'common/**'
               - 'scripts/firmware.sh'
               - '.github/workflows/ci.yml'
+            packaging:
+              - 'packaging/**'
+              - 'host/systemd/**'
+              - 'host/openrc/**'
+              - 'host/runit/**'
+              - 'host/config/**'
+              - '.github/workflows/ci.yml'
 
   host:
+    needs: changes
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -38,7 +47,7 @@ jobs:
           version: 0.16.0
       - run: zig fmt --check build.zig common host firmware/main
       - run: zig build test --summary all
-      - run: zig build -Doptimize=ReleaseSafe
+      - run: zig build -Doptimize=ReleaseSafe -Dversion=v99.0.0
       - run: zig build release
       - run: zig build gen
       - name: Check generated completions
@@ -56,10 +65,23 @@ jobs:
           tar xzf nfpm.tgz nfpm && rm nfpm.tgz
           mkdir -p dist && cp zig-out/bin/hcibridge dist/hcibridge
           openssl genrsa -out packaging/keys/heppu-esp-hci-bridge.rsa 2048 2>/dev/null
+          openssl rsa -in packaging/keys/heppu-esp-hci-bridge.rsa -pubout -out packaging/keys/heppu-esp-hci-bridge.rsa.pub 2>/dev/null
           gpg --batch --quick-gen-key --passphrase '' ci@example.invalid rsa2048 sign 0 2>/dev/null
           gpg --batch --armor --export-secret-keys ci@example.invalid > packaging/keys/hcibridge.gpg
-          for fmt in deb rpm apk; do PKG_ARCH=amd64 VERSION=0.0.0 ./nfpm pkg -f packaging/nfpm.yaml -p $fmt -t .; done
-          ls -1 *.deb *.rpm *.apk
+          gpg --batch --armor --export ci@example.invalid > packaging/keys/hcibridge.gpg.pub
+          mkdir -p pkgs
+          PKG_ARCH=amd64 VERSION=99.0.0 ./nfpm pkg -f packaging/nfpm.yaml -p deb -t pkgs/
+          PKG_ARCH=x86_64 VERSION=99.0.0 ./nfpm pkg -f packaging/nfpm.yaml -p rpm -t pkgs/
+          PKG_ARCH=x86_64 VERSION=99.0.0 ./nfpm pkg -f packaging/nfpm.yaml -p apk -t pkgs/
+          ls -1 pkgs
+      # Only when packaging changed: build the three repositories with the
+      # throwaway keys and install from them, service start included.
+      - name: Repositories and installs in containers
+        if: needs.changes.outputs.packaging == 'true'
+        run: |
+          sudo apt-get -qq update >/dev/null && sudo apt-get -qq install -y dpkg-dev apt-utils createrepo-c gnupg >/dev/null
+          packaging/make-repos.sh pkgs repo packaging/keys
+          packaging/verify-repos.sh repo v99.0.0
 
   firmware:
     runs-on: ubuntu-latest
