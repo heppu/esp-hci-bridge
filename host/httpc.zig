@@ -105,6 +105,13 @@ pub fn postBinary(io: Io, gpa: std.mem.Allocator, addr: *const Io.net.IpAddress,
 
 /// POST with an optional extra header line (without CRLF).
 pub fn postH(io: Io, gpa: std.mem.Allocator, addr: *const Io.net.IpAddress, path: []const u8, body: []const u8, extra: ?[]const u8) !Response {
+    return postProgress(io, gpa, addr, path, body, extra, null, null);
+}
+
+pub const ProgressFn = *const fn (ctx: *anyopaque, sent: usize) void;
+
+/// Like postH, reporting bytes sent so far to `on_progress` as the body goes out.
+pub fn postProgress(io: Io, gpa: std.mem.Allocator, addr: *const Io.net.IpAddress, path: []const u8, body: []const u8, extra: ?[]const u8, on_progress: ?ProgressFn, ctx: ?*anyopaque) !Response {
     var stream = try addr.connect(io, .{ .mode = .stream });
     defer stream.close(io);
     var wbuf: [4096]u8 = undefined;
@@ -112,7 +119,14 @@ pub fn postH(io: Io, gpa: std.mem.Allocator, addr: *const Io.net.IpAddress, path
     try w.interface.print("POST {s} HTTP/1.1\r\nHost: bridge\r\nContent-Type: application/octet-stream\r\nContent-Length: {d}\r\nConnection: close\r\n", .{ path, body.len });
     if (extra) |h| try w.interface.print("{s}\r\n", .{h});
     try w.interface.writeAll("\r\n");
-    try w.interface.writeAll(body);
+    var sent: usize = 0;
+    while (sent < body.len) {
+        const n = @min(16 * 1024, body.len - sent);
+        try w.interface.writeAll(body[sent .. sent + n]);
+        try w.interface.flush();
+        sent += n;
+        if (on_progress) |f| f(ctx.?, sent);
+    }
     try w.interface.flush();
     return readResponse(io, stream, gpa);
 }
