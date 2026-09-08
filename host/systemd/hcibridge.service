@@ -1,16 +1,41 @@
 [Unit]
 Description=ESP HCI bridge daemon
 Documentation=https://github.com/heppu/hcibridge
-Wants=network-online.target
-After=network-online.target
+Wants=network-online.target modprobe@hci_vhci.service
+After=network-online.target modprobe@hci_vhci.service
 
 [Service]
 Type=simple
 EnvironmentFile=-/etc/default/hcibridge
-ExecStartPre=-/sbin/modprobe hci_vhci
 ExecStart=/usr/bin/hcibridge run $BRIDGE_ARGS
 Restart=always
 RestartSec=2
+
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_NET_ADMIN
+DevicePolicy=closed
+DeviceAllow=/dev/vhci rw
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectProc=invisible
+ProcSubset=pid
+ProtectClock=yes
+ProtectHostname=yes
+ProtectControlGroups=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+UMask=0077
 
 [Install]
 WantedBy=multi-user.target
