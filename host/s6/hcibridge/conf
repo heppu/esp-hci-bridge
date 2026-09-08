@@ -1,0 +1,6 @@
+# /etc/sv/hcibridge/conf - sourced by the run script.
+# Settings belong in /etc/hcibridge/hcibridge.conf. This file is for flags and
+# environment overrides, e.g.
+#   OPTS="--subnet 192.168.1.0/24"
+#   export HCIBRIDGE_SUBNET=192.168.1.0/24
+OPTS=""

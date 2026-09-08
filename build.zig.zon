@@ -1,6 +1,6 @@
 .{
     .name = .hcibridge,
-    .version = "1.0.3",
+    .version = "1.0.4",
     .minimum_zig_version = "0.16.0",
     .fingerprint = 0x99423740dd9de94b,
     .paths = .{

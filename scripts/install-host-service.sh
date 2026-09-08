@@ -55,9 +55,9 @@ install -d /etc/modules-load.d
 install -m 0644 "$ROOT/host/modules-load.conf" /etc/modules-load.d/hci_vhci.conf
 modprobe hci_vhci 2>/dev/null || true
 
-# Native layered config: /etc/hcibridge/config + /etc/hcibridge/config.d/*.conf
-install -d /etc/hcibridge/config.d
-[ -f /etc/hcibridge/config ] || install -m 0644 "$ROOT/host/config/config" /etc/hcibridge/config
+# Native layered config: /etc/hcibridge/hcibridge.conf + hcibridge.conf.d/*.conf
+install -d /etc/hcibridge/hcibridge.conf.d
+[ -f /etc/hcibridge/hcibridge.conf ] || install -m 0644 "$ROOT/host/config/hcibridge.conf" /etc/hcibridge/hcibridge.conf
 
 if [ -d /run/systemd/system ]; then
     echo "detected: systemd"
@@ -77,9 +77,9 @@ elif command -v rc-update >/dev/null 2>&1; then
 
 elif command -v sv >/dev/null 2>&1; then
     echo "detected: runit"
-    [ -f /etc/hcibridge.conf ] || install -m 0644 "$ROOT/host/hcibridge.conf" /etc/hcibridge.conf
     install -d /etc/sv/hcibridge/log
     install -m 0755 "$ROOT/host/runit/hcibridge/run" /etc/sv/hcibridge/run
+    [ -f /etc/sv/hcibridge/conf ] || install -m 0644 "$ROOT/host/runit/hcibridge/conf" /etc/sv/hcibridge/conf
     install -m 0755 "$ROOT/host/runit/hcibridge/log/run" /etc/sv/hcibridge/log/run
     install -d /var/log/hcibridge
     for d in /var/service /etc/service /run/runit/service /etc/runit/runsvdir/current; do
@@ -90,10 +90,10 @@ elif command -v sv >/dev/null 2>&1; then
 
 elif command -v s6-rc >/dev/null 2>&1 || command -v s6-svscan >/dev/null 2>&1; then
     echo "detected: s6"
-    [ -f /etc/hcibridge.conf ] || install -m 0644 "$ROOT/host/hcibridge.conf" /etc/hcibridge.conf
     dest=/etc/s6/sv/hcibridge
     install -d "$dest"
     install -m 0755 "$ROOT/host/s6/hcibridge/run" "$dest/run"
+    [ -f "$dest/conf" ] || install -m 0644 "$ROOT/host/s6/hcibridge/conf" "$dest/conf"
     install -m 0644 "$ROOT/host/s6/hcibridge/type" "$dest/type"
     echo "installed s6 service dir at $dest"
     echo "add it to your s6-rc source db and reload, or symlink into your scan dir,"

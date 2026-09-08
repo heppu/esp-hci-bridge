@@ -34,6 +34,7 @@ check() {
     echo "$got" | grep -q '^installed: ' || { echo "install did not happen" >&2; exit 1; }
     [ -z "$VER" ] || echo "$got" | grep -q "$VER" || { echo "expected version $VER" >&2; exit 1; }
     echo "$got" | grep -q '^service: active' || { echo "service is not active" >&2; exit 1; }
+    echo "$got" | grep -q '^config: /etc/hcibridge/hcibridge.conf' || { echo "config is not at the expected path" >&2; exit 1; }
 }
 LIVE=https://heppu.github.io/hcibridge
 
@@ -51,6 +52,12 @@ docker exec vr-debian sh -euc "
   apt-get -qq update >/dev/null
   apt-get -qq install -y hcibridge >/dev/null
   echo \"installed: \$(hcibridge --version)\"
+  layout() {
+    [ -f /etc/hcibridge/hcibridge.conf ] && [ -d /etc/hcibridge/hcibridge.conf.d ] && [ ! -e /etc/hcibridge/config ] \
+      && echo 'config: /etc/hcibridge/hcibridge.conf' \
+      || { echo 'config: wrong layout'; ls -la /etc/hcibridge; }
+  }
+  layout
   sleep 2
   echo \"service: \$(systemctl is-active hcibridge)\"
   journalctl -u hcibridge --no-pager -n 3 | tail -n 2" | check
@@ -72,6 +79,12 @@ docker exec vr-fedora sh -euc "
   dnf -y install hcibridge 2>&1 | tail -n 3
   dnf -y upgrade hcibridge 2>&1 | tail -n 1
   echo \"installed: \$(hcibridge --version)\"
+  layout() {
+    [ -f /etc/hcibridge/hcibridge.conf ] && [ -d /etc/hcibridge/hcibridge.conf.d ] && [ ! -e /etc/hcibridge/config ] \
+      && echo 'config: /etc/hcibridge/hcibridge.conf' \
+      || { echo 'config: wrong layout'; ls -la /etc/hcibridge; }
+  }
+  layout
   sleep 2
   echo \"service: \$(systemctl is-active hcibridge)\"
   journalctl -u hcibridge --no-pager -n 3 | tail -n 2" | check
@@ -84,6 +97,12 @@ run alpine:3.22 sh -euc "
   echo '$URL/alpine' >> /etc/apk/repositories
   apk add -q hcibridge
   echo \"installed: \$(hcibridge --version)\"
+  layout() {
+    [ -f /etc/hcibridge/hcibridge.conf ] && [ -d /etc/hcibridge/hcibridge.conf.d ] && [ ! -e /etc/hcibridge/config ] \
+      && echo 'config: /etc/hcibridge/hcibridge.conf' \
+      || { echo 'config: wrong layout'; ls -la /etc/hcibridge; }
+  }
+  layout
   echo 'service: active (OpenRC, not started in a container)'" | check
 
 echo "all repositories install"

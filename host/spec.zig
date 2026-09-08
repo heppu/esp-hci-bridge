@@ -29,7 +29,7 @@ pub const global_opts = [_]Opt{
     .{ .long = "--help", .short = "-h", .help = "show help" },
 };
 
-const config_opt = Opt{ .long = "--config", .arg = "path", .help = "config file (default /etc/hcibridge/config, plus .d drop-ins)" };
+const config_opt = Opt{ .long = "--config", .arg = "path", .help = "config file (default /etc/hcibridge/hcibridge.conf, plus .d drop-ins)" };
 const discovery_port_opt = Opt{ .long = "--discovery-port", .arg = "n", .help = "UDP discovery port (default 4445)" };
 const board_opt = Opt{ .long = "--board", .arg = "preset", .help = "board preset for the release image, for firmware that does not report it" };
 
