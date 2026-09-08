@@ -2,6 +2,7 @@
 
 [![ci](https://github.com/heppu/hcibridge/actions/workflows/ci.yml/badge.svg)](https://github.com/heppu/hcibridge/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/heppu/hcibridge)](https://github.com/heppu/hcibridge/releases/latest)
+[![packaging status](https://repology.org/badge/tiny-repos/hcibridge.svg)](https://repology.org/project/hcibridge/versions)
 
 A remote Bluetooth adapter for Linux. A small ESP32 board on your network
 becomes a Bluetooth controller for your PC, so gamepads, keyboards, and mice
