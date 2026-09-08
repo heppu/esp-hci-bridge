@@ -86,9 +86,9 @@ services are never started by packages.
 Alpine:
 
 ```sh
-sudo wget -O /etc/apk/keys/heppu-esp-hci-bridge.rsa.pub https://heppu.github.io/esp-hci-bridge/alpine/heppu-esp-hci-bridge.rsa.pub
-echo https://heppu.github.io/esp-hci-bridge/alpine | sudo tee -a /etc/apk/repositories
-sudo apk add hcibridge
+doas wget -O /etc/apk/keys/heppu-esp-hci-bridge.rsa.pub https://heppu.github.io/esp-hci-bridge/alpine/heppu-esp-hci-bridge.rsa.pub
+echo https://heppu.github.io/esp-hci-bridge/alpine | doas tee -a /etc/apk/repositories
+doas apk add hcibridge
 ```
 
 Arch:
