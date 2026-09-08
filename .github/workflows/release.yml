@@ -1,14 +1,54 @@
 name: release
 
+# A release is a commit: bump .version in build.zig.zon, merge to main, and
+# this workflow tags that commit and publishes it. Commits that do not change
+# the version stop after the version job.
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+# Two releases must never interleave: the second would tag while the first is
+# still publishing.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
+      release: ${{ steps.v.outputs.release }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VER=$(sed -n 's/^[[:space:]]*\.version = "\([^"]*\)".*/\1/p' build.zig.zon)
+          echo "$VER" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "build.zig.zon .version is \"$VER\""; exit 1; }
+          {
+            echo "version=$VER"
+            echo "tag=v$VER"
+          } >> "$GITHUB_OUTPUT"
+          # Gated on the release, not on the tag: a run that failed after
+          # tagging can be re-run and will finish the job.
+          if gh release view "v$VER" >/dev/null 2>&1; then
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            echo "v$VER is already released, nothing to do"
+          else
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            echo "releasing v$VER"
+          fi
+
   firmware:
+    needs: version
+    if: needs.version.outputs.release == 'true'
     runs-on: ubuntu-latest
     container:
       image: espressif/idf:v5.5.5@sha256:a9231d0697ab8f7517cc072e93b7c83e04907bfbfba80b6440d7dbbf90665cf2
@@ -38,11 +78,6 @@ jobs:
           curl -sSL -o zig-xtensa.tar.xz https://github.com/kassane/zig-espressif-bootstrap/releases/download/0.16.0-xtensa/zig-relsafe-x86_64-linux-musl-baseline.tar.xz
           echo "9e3dcef9d6f6d552df641a12addc9e443a69b7cbdad85492ec677acd55b7de9b  zig-xtensa.tar.xz" | sha256sum -c -
           tar -xJ -C .tools/zig-xtensa --strip-components=1 -f zig-xtensa.tar.xz && rm zig-xtensa.tar.xz
-      - name: Tag must be on main
-        run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          git fetch --no-tags --depth=200 origin main
-          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "tag $GITHUB_REF_NAME is not on main"; exit 1; }
       - name: Release signing key
         env:
           KEY: ${{ secrets.FIRMWARE_SIGNING_KEY }}
@@ -51,10 +86,11 @@ jobs:
           printf '%s\n' "$KEY" > firmware/secure_boot_signing_key.pem
       - name: Build ${{ matrix.board }}
         shell: bash
+        env:
+          PROJECT_VER: ${{ needs.version.outputs.tag }}
         run: |
           . /opt/esp/idf/export.sh
           export ZIG="$PWD/.tools/zig-xtensa/zig"
-          export PROJECT_VER="${GITHUB_REF_NAME}"
           cd firmware
           B="build-${{ matrix.board }}"
           idf.py -B "$B" -DSDKCONFIG="$B/sdkconfig" \
@@ -73,33 +109,11 @@ jobs:
           name: fw-${{ matrix.board }}
           path: fw/
 
-  site:
-    needs: [firmware, cli]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          pattern: fw-*
-          path: fw
-          merge-multiple: true
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: pkg-repos
-          path: repo
-      - name: Assemble site for all boards
-        run: |
-          scripts/make-site.sh "${GITHUB_REF_NAME}" _site \
-            olimex-esp32-poe=fw/olimex-esp32-poe \
-            wt32-eth01=fw/wt32-eth01 \
-            generic-wifi=fw/generic-wifi
-          cp -r repo/alpine repo/deb repo/rpm repo/hcibridge.gpg repo/hcibridge.gpg.pub _site/
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: site
-          path: _site
-
+  # Binaries, packages, and the signed repositories. None of this needs the
+  # tag to exist, so it all runs before the tag is pushed.
   cli:
+    needs: version
+    if: needs.version.outputs.release == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -107,9 +121,14 @@ jobs:
         with:
           version: 0.16.0
       - run: zig build test --summary all
-      - run: zig build release -Dversion="${GITHUB_REF_NAME}"
+      - run: zig build release
       - name: Generate man page and completions
-        run: zig build gen -Dversion="${GITHUB_REF_NAME}"
+        run: zig build gen
+      - name: The binary must report the version being released
+        run: |
+          zig build --prefix check
+          got=$(./check/bin/hcibridge --version)
+          [ "$got" = "hcibridge ${{ needs.version.outputs.tag }}" ] || { echo "binary says \"$got\""; exit 1; }
       - name: Package signing keys
         env:
           KEY: ${{ secrets.APK_SIGNING_KEY }}
@@ -126,12 +145,12 @@ jobs:
           echo "1a12d47f104bdd5953d33bb1e97b369ffade9c429bfc070fd19977844100d3d2  nfpm.tgz" | sha256sum -c -
           tar xzf nfpm.tgz nfpm && rm nfpm.tgz
           sudo install nfpm /usr/local/bin/nfpm
-      - name: Build packages and metadata
+      - name: Build packages
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
           set -eu
           mkdir -p out
-          VER="${GITHUB_REF_NAME#v}"
-          export VERSION="$VER"
           cp zig-out/x86_64-linux-musl/hcibridge   out/hcibridge-x86_64-linux
           cp zig-out/aarch64-linux-musl/hcibridge  out/hcibridge-aarch64-linux
           cp zig-out/arm-linux-musleabihf/hcibridge out/hcibridge-armv7-linux
@@ -146,27 +165,13 @@ jobs:
               PKG_ARCH="$arch" nfpm pkg -f packaging/nfpm.yaml -p "$fmt" -t out/
             done
           done
-          # AUR PKGBUILD, Alpine APKBUILD and Void template with version + source checksum
-          curl -sSfL -o src.tar.gz "https://github.com/heppu/hcibridge/archive/refs/tags/${GITHUB_REF_NAME}.tar.gz"
-          SHA=$(sha256sum src.tar.gz | cut -d' ' -f1)
-          SHA512=$(sha512sum src.tar.gz | cut -d' ' -f1)
-          sed -e "s/@PKGVER@/$VER/" -e "s/@SHA256@/$SHA/" packaging/PKGBUILD.tmpl > out/PKGBUILD
-          sed -e "s/@PKGVER@/$VER/" -e "s/@SHA512@/$SHA512/" packaging/APKBUILD.tmpl > out/APKBUILD
-          # the -bin PKGBUILD pins every release asset it downloads
-          h() { sha256sum "out/$1" | cut -d' ' -f1; }
-          sed -e "s/@PKGVER@/$VER/" -e "s/@SHA256@/$SHA/" \
-              -e "s/@SHA_MAN@/$(h hcibridge.1)/" -e "s/@SHA_BASH@/$(h hcibridge.bash)/" \
-              -e "s/@SHA_ZSH@/$(h _hcibridge)/" -e "s/@SHA_FISH@/$(h hcibridge.fish)/" \
-              -e "s/@SHA_X86_64@/$(h hcibridge-x86_64-linux)/" -e "s/@SHA_AARCH64@/$(h hcibridge-aarch64-linux)/" \
-              -e "s/@SHA_ARMV7@/$(h hcibridge-armv7-linux)/" packaging/PKGBUILD-bin.tmpl > out/PKGBUILD-bin
-          sed -e "s/@PKGVER@/$VER/" -e "s/@SHA256@/$SHA/" packaging/void-template.tmpl > out/void-template
           ls -1 out/
       - name: Build the package repositories
         run: |
           sudo apt-get -qq update >/dev/null && sudo apt-get -qq install -y dpkg-dev apt-utils createrepo-c gnupg >/dev/null
           packaging/make-repos.sh out repo packaging/keys
       - name: Install from every repository in a container
-        run: packaging/verify-repos.sh repo "${GITHUB_REF_NAME}"
+        run: packaging/verify-repos.sh repo "${{ needs.version.outputs.tag }}"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: cli
@@ -176,9 +181,98 @@ jobs:
           name: pkg-repos
           path: repo/
 
-  # The source recipes on the release page, built the way each distro builds them.
+  site:
+    needs: [version, firmware, cli]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: fw-*
+          path: fw
+          merge-multiple: true
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pkg-repos
+          path: repo
+      - name: Assemble site for all boards
+        run: |
+          scripts/make-site.sh "${{ needs.version.outputs.tag }}" _site \
+            olimex-esp32-poe=fw/olimex-esp32-poe \
+            wt32-eth01=fw/wt32-eth01 \
+            generic-wifi=fw/generic-wifi
+          cp -r repo/alpine repo/deb repo/rpm repo/hcibridge.gpg repo/hcibridge.gpg.pub _site/
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: site
+          path: _site
+
+  # The last cheap place to fail. Everything above is built and installed in
+  # containers before this commit gets a tag anyone can see.
+  tag:
+    needs: [version, firmware, cli, site]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Tag ${{ needs.version.outputs.tag }}
+        env:
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          have=$(git ls-remote --tags origin "refs/tags/$TAG" | cut -f1)
+          if [ -n "$have" ]; then
+            [ "$have" = "$GITHUB_SHA" ] || { echo "$TAG already points at $have, not $GITHUB_SHA"; exit 1; }
+            echo "$TAG already on this commit, re-running a failed release"
+            exit 0
+          fi
+          git tag "$TAG"
+          git push origin "$TAG"
+
+  # The source recipes carry the checksum of the GitHub source tarball, which
+  # only exists once the tag does.
   recipes:
-    needs: cli
+    needs: [version, tag]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: cli
+          path: cli
+      - name: Render the AUR, Alpine, and Void recipes
+        env:
+          VER: ${{ needs.version.outputs.version }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          set -eu
+          mkdir -p out
+          # The tarball is generated on demand, so give it a moment to appear.
+          for i in 1 2 3 4 5; do
+            curl -sSfL -o src.tar.gz "https://github.com/heppu/hcibridge/archive/refs/tags/$TAG.tar.gz" && break
+            echo "attempt $i: source tarball not ready"; sleep 5
+          done
+          SHA=$(sha256sum src.tar.gz | cut -d' ' -f1)
+          SHA512=$(sha512sum src.tar.gz | cut -d' ' -f1)
+          sed -e "s/@PKGVER@/$VER/" -e "s/@SHA256@/$SHA/" packaging/PKGBUILD.tmpl > out/PKGBUILD
+          sed -e "s/@PKGVER@/$VER/" -e "s/@SHA512@/$SHA512/" packaging/APKBUILD.tmpl > out/APKBUILD
+          # the -bin PKGBUILD pins every release asset it downloads
+          h() { sha256sum "cli/$1" | cut -d' ' -f1; }
+          sed -e "s/@PKGVER@/$VER/" -e "s/@SHA256@/$SHA/" \
+              -e "s/@SHA_MAN@/$(h hcibridge.1)/" -e "s/@SHA_BASH@/$(h hcibridge.bash)/" \
+              -e "s/@SHA_ZSH@/$(h _hcibridge)/" -e "s/@SHA_FISH@/$(h hcibridge.fish)/" \
+              -e "s/@SHA_X86_64@/$(h hcibridge-x86_64-linux)/" -e "s/@SHA_AARCH64@/$(h hcibridge-aarch64-linux)/" \
+              -e "s/@SHA_ARMV7@/$(h hcibridge-armv7-linux)/" packaging/PKGBUILD-bin.tmpl > out/PKGBUILD-bin
+          sed -e "s/@PKGVER@/$VER/" -e "s/@SHA256@/$SHA/" packaging/void-template.tmpl > out/void-template
+          ls -1 out/
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: recipes
+          path: out/
+
+  # The source recipes, built the way each distro builds them.
+  recipe-check:
+    needs: [version, recipes]
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -189,10 +283,14 @@ jobs:
         with:
           name: cli
           path: cli
-      - run: packaging/verify-recipes.sh cli "${GITHUB_REF_NAME}" ${{ matrix.distro }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: recipes
+          path: cli
+      - run: packaging/verify-recipes.sh cli "${{ needs.version.outputs.tag }}" ${{ matrix.distro }}
 
   release:
-    needs: [site, cli, recipes]
+    needs: [version, site, cli, recipes, recipe-check]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -207,7 +305,13 @@ jobs:
         with:
           name: cli
           path: cli
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: recipes
+          path: cli
       - name: Assemble assets
+        env:
+          VER: ${{ needs.version.outputs.version }}
         run: |
           mkdir -p release
           # app image and bootloader differ per board, partition table and OTA data do not
@@ -222,7 +326,6 @@ jobs:
           cp cli/* release/
           chmod +x release/hcibridge-*
           # versionless copies so releases/latest/download/<file> always resolves
-          VER="${GITHUB_REF_NAME#v}"
           for f in release/hcibridge_"$VER"_*.deb release/hcibridge_"$VER"_*.apk; do
             cp "$f" "${f/_${VER}_/_}"
           done
@@ -235,18 +338,19 @@ jobs:
           subject-path: release/*
       - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
+          tag_name: ${{ needs.version.outputs.tag }}
           files: release/*
           fail_on_unmatched_files: true
           generate_release_notes: true
 
   # Keeps aur.archlinux.org/packages/hcibridge on the released version.
   aur:
-    needs: release
+    needs: [version, release]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: cli
+          name: recipes
           path: cli
       - name: Generate .SRCINFO for both packages
         run: |
@@ -261,6 +365,7 @@ jobs:
       - name: Push to the AUR
         env:
           KEY: ${{ secrets.AUR_SSH_KEY }}
+          VER: ${{ needs.version.outputs.version }}
         run: |
           test -n "$KEY" || { echo "AUR_SSH_KEY secret missing, skipping"; exit 0; }
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
@@ -272,7 +377,7 @@ jobs:
             cp "aur/$pkg/PKGBUILD" "aur/$pkg/.SRCINFO" "repo-$pkg/"
             ( cd "repo-$pkg"
               git add PKGBUILD .SRCINFO
-              git -c user.name="hcibridge release" -c user.email="henri.koski@bitbrewers.fi" commit -qm "$pkg ${GITHUB_REF_NAME#v}" || { echo "$pkg already current"; exit 0; }
+              git -c user.name="hcibridge release" -c user.email="henri.koski@bitbrewers.fi" commit -qm "$pkg $VER" || { echo "$pkg already current"; exit 0; }
               git push -q origin HEAD:master )
           done
 

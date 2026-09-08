@@ -37,6 +37,34 @@ jobs:
               - 'host/config/**'
               - '.github/workflows/ci.yml'
 
+  versions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - run: scripts/check-versions.sh
+      # A merge to main with a bumped version releases it, so the bump has to
+      # be releasable before it lands.
+      - name: A version bump must be new and higher
+        if: github.event_name == 'pull_request'
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          ver() { sed -n 's/^[[:space:]]*\.version = "\([^"]*\)".*/\1/p' "$1"; }
+          new=$(ver build.zig.zon)
+          git show "$BASE:build.zig.zon" > base.zon
+          old=$(ver base.zon)
+          rm -f base.zon
+          if [ "$new" = "$old" ]; then echo "version unchanged at $old"; exit 0; fi
+          echo "version $old -> $new"
+          [ "$(printf '%s\n%s\n' "$old" "$new" | sort -V | tail -1)" = "$new" ] \
+            || { echo "$new is not higher than $old"; exit 1; }
+          if git ls-remote --exit-code --tags origin "refs/tags/v$new" >/dev/null 2>&1; then
+            echo "v$new is already tagged, merging this would release nothing"
+            exit 1
+          fi
+
   host:
     needs: changes
     runs-on: ubuntu-latest
@@ -48,6 +76,13 @@ jobs:
       - run: zig fmt --check build.zig common host firmware/main
       - run: zig build test --summary all
       - run: zig build -Doptimize=ReleaseSafe -Dversion=v99.0.0
+      # Its own prefix: zig-out holds the v99.0.0 build the packages are made from.
+      - name: The default build takes its version from build.zig.zon
+        run: |
+          zig build --prefix zig-out-default
+          want="hcibridge v$(sed -n 's/^[[:space:]]*\.version = "\([^"]*\)".*/\1/p' build.zig.zon)"
+          got=$(./zig-out-default/bin/hcibridge --version)
+          [ "$got" = "$want" ] || { echo "binary says \"$got\", build.zig.zon says \"$want\""; exit 1; }
       - run: zig build release
       - run: zig build gen
       - name: Check generated completions

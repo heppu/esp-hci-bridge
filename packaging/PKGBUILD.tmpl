@@ -14,8 +14,8 @@ sha256sums=('@SHA256@')
 
 build() {
     cd "hcibridge-$pkgver"
-    zig build -Doptimize=ReleaseSafe "-Dversion=v$pkgver"
-    zig build gen "-Dversion=v$pkgver"
+    zig build -Doptimize=ReleaseSafe
+    zig build gen
 }
 
 package() {
