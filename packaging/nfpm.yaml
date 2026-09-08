@@ -7,7 +7,7 @@ description: |
   Attach remote ESP32 Bluetooth bridges to the local Bluetooth stack.
   Discovers ESP HCI bridges on the LAN and gives each its own adapter.
 vendor: heppu
-homepage: https://github.com/heppu/esp-hci-bridge
+homepage: https://github.com/heppu/hcibridge
 license: MIT
 
 # Per-file `packager:` selects a format; entries without it go to every format.
@@ -67,8 +67,8 @@ rpm:
 
 apk:
   signature:
-    key_file: packaging/keys/heppu-esp-hci-bridge.rsa
-    key_name: heppu-esp-hci-bridge
+    key_file: packaging/keys/heppu-hcibridge.rsa
+    key_name: heppu-hcibridge
 
 overrides:
   deb:

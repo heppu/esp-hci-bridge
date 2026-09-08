@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>esp-hci-bridge</title>
+<title>hcibridge</title>
 <style>
   :root {
     color-scheme: light dark;
@@ -53,7 +53,7 @@
 <body>
 <main>
 <header>
-  <h1>esp-hci-bridge</h1>
+  <h1>hcibridge</h1>
   <p>A remote Bluetooth adapter for Linux. Flash a board here, install the PC tool, claim the board, pair your devices. Five minutes, no cables after the first step.</p>
 </header>
 
@@ -86,7 +86,7 @@
     </div>
 
     <div class="note warn" id="poe-note">On the non-ISO Olimex ESP32-POE, unplug PoE before connecting USB. Olimex warns the missing isolation can damage the PC.</div>
-    <div class="note" id="wifi-note" hidden>WiFi boards start a setup hotspot after flashing. Join <code>esp-hci-bridge-setup</code> from a phone or laptop, open <code>http://192.168.4.1/</code>, and enter your WiFi name and password. The board reboots onto your network.</div>
+    <div class="note" id="wifi-note" hidden>WiFi boards start a setup hotspot after flashing. Join <code>hcibridge-setup</code> from a phone or laptop, open <code>http://192.168.4.1/</code>, and enter your WiFi name and password. The board reboots onto your network.</div>
   </div>
 </section>
 
@@ -103,8 +103,8 @@
     <li><button role="tab" aria-selected="false" data-tab="other">Other</button></li>
   </ul>
   <div class="panel" data-panel="apk">
-<pre><code>doas wget -O /etc/apk/keys/heppu-esp-hci-bridge.rsa.pub https://heppu.github.io/esp-hci-bridge/alpine/heppu-esp-hci-bridge.rsa.pub
-echo https://heppu.github.io/esp-hci-bridge/alpine | doas tee -a /etc/apk/repositories
+<pre><code>doas wget -O /etc/apk/keys/heppu-hcibridge.rsa.pub https://heppu.github.io/hcibridge/alpine/heppu-hcibridge.rsa.pub
+echo https://heppu.github.io/hcibridge/alpine | doas tee -a /etc/apk/repositories
 doas apk add hcibridge</code></pre>
     <p class="meta">A signed repository for <code>x86_64</code>, <code>aarch64</code>, and <code>armv7</code>. <code>apk upgrade</code> picks up new releases. The service is <code>hcibridged</code> under OpenRC.</p>
   </div>
@@ -114,25 +114,25 @@ sudo systemctl enable --now hcibridge</code></pre>
     <p class="meta">From the <a href="https://aur.archlinux.org/packages/hcibridge">AUR</a>, built from source with the Zig in the Arch repos. Arch does not start services on install, hence the second line. Any AUR helper works, or <code>makepkg -si</code> on the PKGBUILD from the release page.</p>
   </div>
   <div class="panel" data-panel="deb" hidden>
-<pre><code>sudo curl -fsSLo /etc/apt/keyrings/hcibridge.gpg https://heppu.github.io/esp-hci-bridge/hcibridge.gpg
-echo "deb [signed-by=/etc/apt/keyrings/hcibridge.gpg] https://heppu.github.io/esp-hci-bridge/deb stable main" | sudo tee /etc/apt/sources.list.d/hcibridge.list
+<pre><code>sudo curl -fsSLo /etc/apt/keyrings/hcibridge.gpg https://heppu.github.io/hcibridge/hcibridge.gpg
+echo "deb [signed-by=/etc/apt/keyrings/hcibridge.gpg] https://heppu.github.io/hcibridge/deb stable main" | sudo tee /etc/apt/sources.list.d/hcibridge.list
 sudo apt update &amp;&amp; sudo apt install hcibridge</code></pre>
     <p class="meta">A signed repository for <code>amd64</code>, <code>arm64</code>, and <code>armhf</code>. <code>apt upgrade</code> picks up new releases.</p>
   </div>
   <div class="panel" data-panel="rpm" hidden>
-<pre><code>sudo curl -fsSLo /etc/yum.repos.d/hcibridge.repo https://heppu.github.io/esp-hci-bridge/rpm/hcibridge.repo
+<pre><code>sudo curl -fsSLo /etc/yum.repos.d/hcibridge.repo https://heppu.github.io/hcibridge/rpm/hcibridge.repo
 sudo dnf install hcibridge</code></pre>
     <p class="meta">A signed repository for <code>x86_64</code>, <code>aarch64</code>, and <code>armhfp</code>. <code>dnf upgrade</code> picks up new releases.</p>
   </div>
   <div class="panel" data-panel="void" hidden>
-<pre><code>curl -LO https://github.com/heppu/esp-hci-bridge/releases/latest/download/void-template
+<pre><code>curl -LO https://github.com/heppu/hcibridge/releases/latest/download/void-template
 <span class="c"># drop it into your void-packages checkout as srcpkgs/hcibridge/template, then</span>
 ./xbps-src pkg hcibridge &amp;&amp; sudo xbps-install --repository hostdir/binpkgs hcibridge</code></pre>
   </div>
   <div class="panel" data-panel="other" hidden>
-    <p>Static binaries for x86_64, aarch64, and armv7 are on the <a href="https://github.com/heppu/esp-hci-bridge/releases/latest">release page</a>, along with the man page and shell completions. The install script in the repository sets up the service for systemd, OpenRC, runit, or s6:</p>
-<pre><code>git clone https://github.com/heppu/esp-hci-bridge
-cd esp-hci-bridge &amp;&amp; sudo scripts/install-host-service.sh</code></pre>
+    <p>Static binaries for x86_64, aarch64, and armv7 are on the <a href="https://github.com/heppu/hcibridge/releases/latest">release page</a>, along with the man page and shell completions. The install script in the repository sets up the service for systemd, OpenRC, runit, or s6:</p>
+<pre><code>git clone https://github.com/heppu/hcibridge
+cd hcibridge &amp;&amp; sudo scripts/install-host-service.sh</code></pre>
   </div>
 </section>
 
@@ -165,13 +165,13 @@ connect XX:XX:XX:XX:XX:XX</code></pre>
     <tr><td><code>sudo hcibridge revoke &lt;bdaddr&gt;</code></td><td>stop trusting a board</td></tr>
     <tr><td><code>sudo hcibridge unclaim &lt;ip&gt;</code></td><td>release a board so another PC can claim it</td></tr>
   </table>
-  <p>Problems? The <a href="https://github.com/heppu/esp-hci-bridge#troubleshooting">troubleshooting section</a> covers the ones seen so far.</p>
+  <p>Problems? The <a href="https://github.com/heppu/hcibridge#troubleshooting">troubleshooting section</a> covers the ones seen so far.</p>
 </section>
 
 <footer>
-  <a href="https://github.com/heppu/esp-hci-bridge">Source</a> ·
-  <a href="https://github.com/heppu/esp-hci-bridge/releases/latest">Releases</a> ·
-  <a href="https://github.com/heppu/esp-hci-bridge/blob/main/SECURITY.md">Security</a>
+  <a href="https://github.com/heppu/hcibridge">Source</a> ·
+  <a href="https://github.com/heppu/hcibridge/releases/latest">Releases</a> ·
+  <a href="https://github.com/heppu/hcibridge/blob/main/SECURITY.md">Security</a>
 </footer>
 </main>
 

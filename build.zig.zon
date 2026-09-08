@@ -1,8 +1,8 @@
 .{
-    .name = .esp_hci_bridge,
+    .name = .hcibridge,
     .version = "0.1.0",
     .minimum_zig_version = "0.16.0",
-    .fingerprint = 0x74aa55c89f621659,
+    .fingerprint = 0x99423740dd9de94b,
     .paths = .{
         "build.zig",
         "build.zig.zon",

@@ -1,7 +1,7 @@
-# esp-hci-bridge
+# hcibridge
 
-[![ci](https://github.com/heppu/esp-hci-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/heppu/esp-hci-bridge/actions/workflows/ci.yml)
-[![release](https://img.shields.io/github/v/release/heppu/esp-hci-bridge)](https://github.com/heppu/esp-hci-bridge/releases/latest)
+[![ci](https://github.com/heppu/hcibridge/actions/workflows/ci.yml/badge.svg)](https://github.com/heppu/hcibridge/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/heppu/hcibridge)](https://github.com/heppu/hcibridge/releases/latest)
 
 A remote Bluetooth adapter for Linux. A small ESP32 board on your network
 becomes a Bluetooth controller for your PC, so gamepads, keyboards, and mice
@@ -66,10 +66,10 @@ is remote.
 
 ### 1. Flash the board
 
-Open the [web flasher](https://heppu.github.io/esp-hci-bridge/) in Chrome,
+Open the [web flasher](https://heppu.github.io/hcibridge/) in Chrome,
 Chromium, or Edge. Pick your board, plug it in over USB, click Install.
 
-WiFi boards start a setup hotspot on first boot. Join `esp-hci-bridge-setup`
+WiFi boards start a setup hotspot on first boot. Join `hcibridge-setup`
 from a phone or laptop, open `http://192.168.4.1/`, and enter your WiFi name
 and password. The board reboots onto your network.
 
@@ -86,8 +86,8 @@ services are never started by packages.
 Alpine:
 
 ```sh
-doas wget -O /etc/apk/keys/heppu-esp-hci-bridge.rsa.pub https://heppu.github.io/esp-hci-bridge/alpine/heppu-esp-hci-bridge.rsa.pub
-echo https://heppu.github.io/esp-hci-bridge/alpine | doas tee -a /etc/apk/repositories
+doas wget -O /etc/apk/keys/heppu-hcibridge.rsa.pub https://heppu.github.io/hcibridge/alpine/heppu-hcibridge.rsa.pub
+echo https://heppu.github.io/hcibridge/alpine | doas tee -a /etc/apk/repositories
 doas apk add hcibridge
 ```
 
@@ -101,28 +101,28 @@ sudo systemctl enable --now hcibridge
 Debian, Ubuntu:
 
 ```sh
-sudo curl -fsSLo /etc/apt/keyrings/hcibridge.gpg https://heppu.github.io/esp-hci-bridge/hcibridge.gpg
-echo "deb [signed-by=/etc/apt/keyrings/hcibridge.gpg] https://heppu.github.io/esp-hci-bridge/deb stable main" | sudo tee /etc/apt/sources.list.d/hcibridge.list
+sudo curl -fsSLo /etc/apt/keyrings/hcibridge.gpg https://heppu.github.io/hcibridge/hcibridge.gpg
+echo "deb [signed-by=/etc/apt/keyrings/hcibridge.gpg] https://heppu.github.io/hcibridge/deb stable main" | sudo tee /etc/apt/sources.list.d/hcibridge.list
 sudo apt update && sudo apt install hcibridge
 ```
 
 Fedora, RHEL:
 
 ```sh
-sudo curl -fsSLo /etc/yum.repos.d/hcibridge.repo https://heppu.github.io/esp-hci-bridge/rpm/hcibridge.repo
+sudo curl -fsSLo /etc/yum.repos.d/hcibridge.repo https://heppu.github.io/hcibridge/rpm/hcibridge.repo
 sudo dnf install hcibridge
 ```
 
 Void:
 
 ```sh
-curl -fsSLo srcpkgs/hcibridge/template https://github.com/heppu/esp-hci-bridge/releases/latest/download/void-template   # in a void-packages checkout
+curl -fsSLo srcpkgs/hcibridge/template https://github.com/heppu/hcibridge/releases/latest/download/void-template   # in a void-packages checkout
 ./xbps-src pkg hcibridge && sudo xbps-install --repository hostdir/binpkgs hcibridge
 sudo ln -s /etc/sv/hcibridge /var/service/
 ```
 
 Anything else: the static binaries, man page, and completions are on the
-[release page](https://github.com/heppu/esp-hci-bridge/releases/latest), and
+[release page](https://github.com/heppu/hcibridge/releases/latest), and
 `sudo scripts/install-host-service.sh` from a checkout sets up the service for
 systemd, OpenRC, runit, or s6. Every release builds the Arch, Alpine, and Void
 recipes the way their distro does before it is published.
@@ -282,7 +282,7 @@ GitHub Actions:
 
 ```sh
 sha256sum -c --ignore-missing SHA256SUMS
-gh attestation verify hcibridge_*_amd64.deb --repo heppu/esp-hci-bridge
+gh attestation verify hcibridge_*_amd64.deb --repo heppu/hcibridge
 ```
 
 ## Upgrade notes

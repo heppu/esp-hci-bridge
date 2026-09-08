@@ -183,8 +183,8 @@ static esp_err_t portal_get(httpd_req_t *req)
 {
     static const char page[] =
         "<!doctype html><meta name=viewport content='width=device-width,initial-scale=1'>"
-        "<title>esp-hci-bridge setup</title>"
-        "<h2>esp-hci-bridge WiFi setup</h2>"
+        "<title>hcibridge setup</title>"
+        "<h2>hcibridge WiFi setup</h2>"
         "<form method=POST action=/save>"
         "<p>SSID:<br><input name=ssid maxlength=31 required>"
         "<p>Password:<br><input name=pass type=password maxlength=63>"
@@ -262,8 +262,8 @@ static void start_portal(void)
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
     wifi_config_t ap = {0};
-    strlcpy((char *)ap.ap.ssid, "esp-hci-bridge-setup", sizeof(ap.ap.ssid));
-    ap.ap.ssid_len = strlen("esp-hci-bridge-setup");
+    strlcpy((char *)ap.ap.ssid, "hcibridge-setup", sizeof(ap.ap.ssid));
+    ap.ap.ssid_len = strlen("hcibridge-setup");
     ap.ap.max_connection = 2;
     ap.ap.authmode = WIFI_AUTH_OPEN;
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
@@ -277,7 +277,7 @@ static void start_portal(void)
     const httpd_uri_t save = {.uri = "/save", .method = HTTP_POST, .handler = portal_save};
     httpd_register_uri_handler(server, &get);
     httpd_register_uri_handler(server, &save);
-    ESP_LOGW(TAG, "no wifi credentials: join AP \"esp-hci-bridge-setup\" and open http://192.168.4.1/");
+    ESP_LOGW(TAG, "no wifi credentials: join AP \"hcibridge-setup\" and open http://192.168.4.1/");
 }
 
 // Returns false when it entered provisioning (caller must not start the bridge).

@@ -7,7 +7,7 @@ set -eu
 PKGS=$1
 REPO=$2
 KEYS=$3
-SITE=https://heppu.github.io/esp-hci-bridge
+SITE=https://heppu.github.io/hcibridge
 
 export GNUPGHOME=$(mktemp -d)
 trap 'rm -rf "$GNUPGHOME"' EXIT
@@ -30,8 +30,8 @@ for a in $ARCHES; do
     gzip -9 -k -f "$d/Packages"
 done
 ( cd "$DEB/dists/stable" && apt-ftparchive \
-    -o APT::FTPArchive::Release::Origin=esp-hci-bridge \
-    -o APT::FTPArchive::Release::Label=esp-hci-bridge \
+    -o APT::FTPArchive::Release::Origin=hcibridge \
+    -o APT::FTPArchive::Release::Label=hcibridge \
     -o APT::FTPArchive::Release::Suite=stable \
     -o APT::FTPArchive::Release::Codename=stable \
     -o APT::FTPArchive::Release::Architectures="$ARCHES" \
@@ -53,7 +53,7 @@ for pair in "x86_64 x86_64" "aarch64 aarch64" "armv7hl armhfp"; do
 done
 cat > "$RPM/hcibridge.repo" <<EOF
 [hcibridge]
-name=esp-hci-bridge
+name=hcibridge
 baseurl=$SITE/rpm/\$basearch
 enabled=1
 gpgcheck=1
@@ -62,7 +62,7 @@ gpgkey=$SITE/hcibridge.gpg.pub
 EOF
 
 # apk: one directory per arch, index signed the way abuild-sign does it
-AKEY=heppu-esp-hci-bridge
+AKEY=heppu-hcibridge
 APK="$REPO/alpine"
 mkdir -p "$APK"
 cp "$KEYS/$AKEY.rsa.pub" "$APK/"

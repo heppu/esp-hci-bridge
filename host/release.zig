@@ -5,7 +5,7 @@ const Io = std.Io;
 const log = std.log;
 const ui = @import("ui.zig");
 
-pub const repo = "heppu/esp-hci-bridge";
+pub const repo = "heppu/hcibridge";
 const latest_url = "https://github.com/" ++ repo ++ "/releases/latest";
 const download_base = "https://github.com/" ++ repo ++ "/releases/download/";
 const max_body = 4 * 1024 * 1024;
@@ -24,7 +24,7 @@ pub const Latest = struct {
     }
 
     pub fn imageName(board: []const u8, buf: *[128]u8) ![]const u8 {
-        return std.fmt.bufPrint(buf, "esp-hci-bridge-{s}.bin", .{board});
+        return std.fmt.bufPrint(buf, "hcibridge-{s}.bin", .{board});
     }
 
     /// Downloads and hash-checks the image for one board preset. Caller frees.
@@ -57,22 +57,31 @@ pub fn latest(client: *std.http.Client, gpa: std.mem.Allocator) !Latest {
 }
 
 /// The release page redirects to /releases/tag/<tag>. No API call, so no
-/// unauthenticated rate limit to run into.
+/// unauthenticated rate limit to run into. A renamed repository answers with
+/// a redirect to the new name first, so keep following until the tag shows up.
 fn latestTag(client: *std.http.Client, gpa: std.mem.Allocator) ![]const u8 {
-    const uri = try std.Uri.parse(latest_url);
-    // The redirect body is never read, so do not hand this connection back to the pool.
-    var req = try client.request(.GET, uri, .{ .redirect_behavior = .unhandled, .headers = headers, .keep_alive = false });
-    defer req.deinit();
-    try req.sendBodiless();
-    var rbuf: [8192]u8 = undefined;
-    var res = try req.receiveHead(&rbuf);
-    if (res.head.status.class() != .redirect) {
-        log.err("GET {s}: HTTP {d}, expected a redirect to the latest tag", .{ latest_url, @intFromEnum(res.head.status) });
-        return error.HttpStatus;
+    var loc_buf: [4096]u8 = undefined;
+    var cur: []const u8 = latest_url;
+    var hops: usize = 0;
+    while (hops < 6) : (hops += 1) {
+        const uri = try std.Uri.parse(cur);
+        // The redirect body is never read, so do not hand this connection back to the pool.
+        var req = try client.request(.GET, uri, .{ .redirect_behavior = .unhandled, .headers = headers, .keep_alive = false });
+        defer req.deinit();
+        try req.sendBodiless();
+        var rbuf: [8192]u8 = undefined;
+        var res = try req.receiveHead(&rbuf);
+        if (res.head.status.class() != .redirect) {
+            log.err("GET {s}: HTTP {d}, expected a redirect to the latest tag", .{ cur, @intFromEnum(res.head.status) });
+            return error.HttpStatus;
+        }
+        const loc = res.head.location orelse return error.NoRedirectLocation;
+        if (tagFromLocation(loc)) |tag| return gpa.dupe(u8, tag);
+        if (loc.len > loc_buf.len) return error.RedirectTooLong;
+        @memcpy(loc_buf[0..loc.len], loc);
+        cur = loc_buf[0..loc.len];
     }
-    const loc = res.head.location orelse return error.NoRedirectLocation;
-    const tag = tagFromLocation(loc) orelse return error.NoTagInRedirect;
-    return gpa.dupe(u8, tag);
+    return error.NoTagInRedirect;
 }
 
 fn get(client: *std.http.Client, gpa: std.mem.Allocator, url: []const u8) ![]u8 {
@@ -179,15 +188,15 @@ pub fn sumFor(sums: []const u8, name: []const u8) ?[]const u8 {
 }
 
 test "tag from redirect location" {
-    try std.testing.expectEqualStrings("v0.10.9", tagFromLocation("https://github.com/heppu/esp-hci-bridge/releases/tag/v0.10.9").?);
-    try std.testing.expectEqualStrings("v0.10.9", tagFromLocation("/heppu/esp-hci-bridge/releases/tag/v0.10.9?x=1").?);
-    try std.testing.expect(tagFromLocation("https://github.com/heppu/esp-hci-bridge/releases") == null);
+    try std.testing.expectEqualStrings("v0.10.9", tagFromLocation("https://github.com/heppu/hcibridge/releases/tag/v0.10.9").?);
+    try std.testing.expectEqualStrings("v0.10.9", tagFromLocation("/heppu/hcibridge/releases/tag/v0.10.9?x=1").?);
+    try std.testing.expect(tagFromLocation("https://github.com/heppu/hcibridge/releases") == null);
     try std.testing.expect(tagFromLocation("/releases/tag/../evil") == null);
 }
 
 test "sum lookup" {
-    const sums = "aa" ** 32 ++ "  esp-hci-bridge-olimex-esp32-poe.bin\n" ++ "bb" ** 32 ++ " *other.bin\n";
-    try std.testing.expectEqualStrings("aa" ** 32, sumFor(sums, "esp-hci-bridge-olimex-esp32-poe.bin").?);
+    const sums = "aa" ** 32 ++ "  hcibridge-olimex-esp32-poe.bin\n" ++ "bb" ** 32 ++ " *other.bin\n";
+    try std.testing.expectEqualStrings("aa" ** 32, sumFor(sums, "hcibridge-olimex-esp32-poe.bin").?);
     try std.testing.expectEqualStrings("bb" ** 32, sumFor(sums, "other.bin").?);
     try std.testing.expect(sumFor(sums, "missing.bin") == null);
 }

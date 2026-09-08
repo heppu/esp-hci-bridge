@@ -63,7 +63,7 @@ jobs:
         run: |
           B="firmware/build-${{ matrix.board }}"
           mkdir -p "fw/${{ matrix.board }}"
-          cp "$B/flash_args" "$B/esp-hci-bridge.bin" "fw/${{ matrix.board }}/"
+          cp "$B/flash_args" "$B/hcibridge.bin" "fw/${{ matrix.board }}/"
           mkdir -p "fw/${{ matrix.board }}/bootloader" "fw/${{ matrix.board }}/partition_table"
           cp "$B/bootloader/bootloader.bin" "fw/${{ matrix.board }}/bootloader/"
           cp "$B/partition_table/partition-table.bin" "fw/${{ matrix.board }}/partition_table/"
@@ -117,7 +117,7 @@ jobs:
         run: |
           test -n "$KEY" || { echo "APK_SIGNING_KEY secret missing: refusing to release unsigned packages"; exit 1; }
           test -n "$GPG" || { echo "GPG_SIGNING_KEY secret missing: refusing to release unsigned packages"; exit 1; }
-          printf '%s\n' "$KEY" > packaging/keys/heppu-esp-hci-bridge.rsa
+          printf '%s\n' "$KEY" > packaging/keys/heppu-hcibridge.rsa
           printf '%s\n' "$GPG" > packaging/keys/hcibridge.gpg
       - name: Install nfpm
         run: |
@@ -147,7 +147,7 @@ jobs:
             done
           done
           # AUR PKGBUILD, Alpine APKBUILD and Void template with version + source checksum
-          curl -sSfL -o src.tar.gz "https://github.com/heppu/esp-hci-bridge/archive/refs/tags/${GITHUB_REF_NAME}.tar.gz"
+          curl -sSfL -o src.tar.gz "https://github.com/heppu/hcibridge/archive/refs/tags/${GITHUB_REF_NAME}.tar.gz"
           SHA=$(sha256sum src.tar.gz | cut -d' ' -f1)
           SHA512=$(sha512sum src.tar.gz | cut -d' ' -f1)
           sed -e "s/@PKGVER@/$VER/" -e "s/@SHA256@/$SHA/" packaging/PKGBUILD.tmpl > out/PKGBUILD
@@ -212,7 +212,7 @@ jobs:
           mkdir -p release
           # app image and bootloader differ per board, partition table and OTA data do not
           for b in olimex-esp32-poe wt32-eth01 generic-wifi; do
-            cp "_site/firmware/$b/esp-hci-bridge.bin" "release/esp-hci-bridge-$b.bin"
+            cp "_site/firmware/$b/hcibridge.bin" "release/hcibridge-$b.bin"
             cp "_site/firmware/$b/bootloader.bin" "release/bootloader-$b.bin"
             for f in partition-table.bin ota_data_initial.bin; do
               [ -f "_site/firmware/$b/$f" ] || continue
@@ -272,7 +272,7 @@ jobs:
             cp "aur/$pkg/PKGBUILD" "aur/$pkg/.SRCINFO" "repo-$pkg/"
             ( cd "repo-$pkg"
               git add PKGBUILD .SRCINFO
-              git -c user.name="esp-hci-bridge release" -c user.email="henri.koski@bitbrewers.fi" commit -qm "$pkg ${GITHUB_REF_NAME#v}" || { echo "$pkg already current"; exit 0; }
+              git -c user.name="hcibridge release" -c user.email="henri.koski@bitbrewers.fi" commit -qm "$pkg ${GITHUB_REF_NAME#v}" || { echo "$pkg already current"; exit 0; }
               git push -q origin HEAD:master )
           done
 

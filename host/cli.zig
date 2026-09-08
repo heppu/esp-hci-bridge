@@ -495,7 +495,7 @@ pub fn unclaim(io: Io, gpa: std.mem.Allocator, ip: []const u8, cfg_path: []const
     var r = try httpc.postH(io, gpa, &addr, "/unclaim", "", hdr);
     defer r.deinit(gpa);
     if (r.status == 404) {
-        u.fail("{s} runs firmware without unclaim support: run `hcibridge update {s} <esp-hci-bridge-<board>.bin>` first", .{ ip, ip }, "", .{});
+        u.fail("{s} runs firmware without unclaim support: run `hcibridge update {s} <hcibridge-<board>.bin>` first", .{ ip, ip }, "", .{});
         return 1;
     }
     if (r.status != 200) {

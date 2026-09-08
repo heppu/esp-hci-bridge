@@ -110,7 +110,7 @@ vectors that both must match.
 
 ## Package repository
 
-Alpine packages are signed with `packaging/keys/heppu-esp-hci-bridge.rsa`
+Alpine packages are signed with `packaging/keys/heppu-hcibridge.rsa`
 (private, gitignored, also the `APK_SIGNING_KEY` secret) and the public half is
 committed next to it and published at `/alpine/` on the site together with a
 signed `APKINDEX.tar.gz` per architecture. The release job builds the index in
