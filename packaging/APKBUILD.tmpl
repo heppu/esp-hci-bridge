@@ -19,6 +19,10 @@ build() {
 	zig build gen
 }
 
+check() {
+	zig build test
+}
+
 package() {
 	install -Dm755 "$builddir"/zig-out/bin/hcibridge "$pkgdir"/usr/bin/hcibridge
 	install -Dm644 "$builddir"/zig-out/gen/hcibridge.1 "$pkgdir"/usr/share/man/man1/hcibridge.1

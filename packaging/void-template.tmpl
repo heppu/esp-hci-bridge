@@ -31,6 +31,11 @@ do_build() {
 	"${wrksrc}/${_zig}/zig" build gen
 }
 
+do_check() {
+	export ZIG_GLOBAL_CACHE_DIR="${wrksrc}/zig-cache"
+	"${wrksrc}/${_zig}/zig" build test
+}
+
 do_install() {
 	vbin zig-out/bin/hcibridge
 	vman zig-out/gen/hcibridge.1
