@@ -6,7 +6,7 @@ menu "HCI bridge"
 
     config BRIDGE_HOSTNAME
         string "DHCP hostname"
-        default "esp-hci-bridge"
+        default "hcibridge"
 
     config BRIDGE_BOARD_ID
         string "Board preset name, matches the release image name"

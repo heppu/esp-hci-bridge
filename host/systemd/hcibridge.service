@@ -1,6 +1,6 @@
 [Unit]
 Description=ESP HCI bridge daemon
-Documentation=https://github.com/heppu/esp-hci-bridge
+Documentation=https://github.com/heppu/hcibridge
 Wants=network-online.target
 After=network-online.target
 

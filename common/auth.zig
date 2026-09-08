@@ -177,12 +177,12 @@ test "handshake macs verify and are direction-bound" {
 test "announce sign/verify" {
     const psk: Psk = [_]u8{9} ** 32;
     var sig: [announce_sig_hex_len]u8 = undefined;
-    _ = announceSig(&psk, "a0:a3:b3:2f:61:1e", 4444, "esp-hci-bridge", .{ 172, 16, 135, 242 }, &sig);
+    _ = announceSig(&psk, "a0:a3:b3:2f:61:1e", 4444, "hcibridge", .{ 172, 16, 135, 242 }, &sig);
     const ip: [4]u8 = .{ 172, 16, 135, 242 };
-    try testing.expect(verifyAnnounce(&psk, "a0:a3:b3:2f:61:1e", 4444, "esp-hci-bridge", ip, &sig));
-    try testing.expect(!verifyAnnounce(&psk, "a0:a3:b3:2f:61:1e", 4445, "esp-hci-bridge", ip, &sig));
+    try testing.expect(verifyAnnounce(&psk, "a0:a3:b3:2f:61:1e", 4444, "hcibridge", ip, &sig));
+    try testing.expect(!verifyAnnounce(&psk, "a0:a3:b3:2f:61:1e", 4445, "hcibridge", ip, &sig));
     try testing.expect(!verifyAnnounce(&psk, "a0:a3:b3:2f:61:1e", 4444, "evil", ip, &sig));
-    try testing.expect(!verifyAnnounce(&psk, "a0:a3:b3:2f:61:1e", 4444, "esp-hci-bridge", .{ 172, 16, 135, 243 }, &sig));
+    try testing.expect(!verifyAnnounce(&psk, "a0:a3:b3:2f:61:1e", 4444, "hcibridge", .{ 172, 16, 135, 243 }, &sig));
 }
 
 test "claim derives the same psk on both sides" {

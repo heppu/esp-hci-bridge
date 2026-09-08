@@ -78,11 +78,11 @@ test "probe round trip" {
 
 test "announce round trip" {
     var buf: [128]u8 = undefined;
-    const a = try buildAnnounce(&buf, "a0:a3:b3:2f:61:1e", 4444, "esp-hci-bridge", "-");
+    const a = try buildAnnounce(&buf, "a0:a3:b3:2f:61:1e", 4444, "hcibridge", "-");
     const m = try parse(a);
     try testing.expectEqualStrings("a0:a3:b3:2f:61:1e", m.announce.bdaddr);
     try testing.expectEqual(@as(u16, 4444), m.announce.port);
-    try testing.expectEqualStrings("esp-hci-bridge", m.announce.name);
+    try testing.expectEqualStrings("hcibridge", m.announce.name);
     try testing.expectEqualStrings("-", m.announce.sig);
     const b = try buildAnnounce(&buf, "a0:a3:b3:2f:61:1e", 4444, "x", "0011223344556677889900aabbccddee");
     try testing.expectEqualStrings("0011223344556677889900aabbccddee", (try parse(b)).announce.sig);

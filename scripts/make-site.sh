@@ -31,7 +31,7 @@ for spec in "$@"; do
 
     cat > "$OUT/manifest-$board.json" <<JSON
 {
-  "name": "esp-hci-bridge ($board)",
+  "name": "hcibridge ($board)",
   "version": "$VERSION",
   "built": "$BUILT",
   "new_install_prompt_erase": true,

@@ -4,14 +4,14 @@ pkgver=@PKGVER@
 pkgrel=1
 pkgdesc="Attach remote ESP32 Bluetooth bridges to the local Bluetooth stack (release binary)"
 arch=('x86_64' 'aarch64' 'armv7h')
-url="https://github.com/heppu/esp-hci-bridge"
+url="https://github.com/heppu/hcibridge"
 license=('MIT')
 depends=('bluez')
 provides=('hcibridge')
 conflicts=('hcibridge')
 backup=('etc/hcibridge/config' 'etc/hcibridge/config.d/50-example.conf' 'etc/default/hcibridge')
-_rel="https://github.com/heppu/esp-hci-bridge/releases/download/v$pkgver"
-source=("hcibridge-$pkgver.tar.gz::https://github.com/heppu/esp-hci-bridge/archive/refs/tags/v$pkgver.tar.gz"
+_rel="https://github.com/heppu/hcibridge/releases/download/v$pkgver"
+source=("hcibridge-$pkgver.tar.gz::https://github.com/heppu/hcibridge/archive/refs/tags/v$pkgver.tar.gz"
         "hcibridge.1-$pkgver::$_rel/hcibridge.1"
         "hcibridge.bash-$pkgver::$_rel/hcibridge.bash"
         "_hcibridge-$pkgver::$_rel/_hcibridge"
@@ -25,7 +25,7 @@ sha256sums_aarch64=('@SHA_AARCH64@')
 sha256sums_armv7h=('@SHA_ARMV7@')
 
 package() {
-    local src="esp-hci-bridge-$pkgver"
+    local src="hcibridge-$pkgver"
     install -Dm755 "hcibridge-$pkgver-$CARCH" "$pkgdir/usr/bin/hcibridge"
     install -Dm644 "hcibridge.1-$pkgver" "$pkgdir/usr/share/man/man1/hcibridge.1"
     install -Dm644 "hcibridge.bash-$pkgver" "$pkgdir/usr/share/bash-completion/completions/hcibridge"

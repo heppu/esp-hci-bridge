@@ -35,7 +35,7 @@ check() {
     [ -z "$VER" ] || echo "$got" | grep -q "$VER" || { echo "expected version $VER" >&2; exit 1; }
     echo "$got" | grep -q '^service: active' || { echo "service is not active" >&2; exit 1; }
 }
-LIVE=https://heppu.github.io/esp-hci-bridge
+LIVE=https://heppu.github.io/hcibridge
 
 echo "== debian"
 if boot vr-debian -e DEBIAN_FRONTEND=noninteractive debian:stable-slim sh -c 'apt-get -qq update >/dev/null && apt-get -qq install -y systemd ca-certificates curl >/dev/null && exec /lib/systemd/systemd'; then
@@ -80,7 +80,7 @@ fi
 
 echo "== alpine"
 run alpine:3.22 sh -euc "
-  cp /repo/alpine/heppu-esp-hci-bridge.rsa.pub /etc/apk/keys/
+  cp /repo/alpine/heppu-hcibridge.rsa.pub /etc/apk/keys/
   echo '$URL/alpine' >> /etc/apk/repositories
   apk add -q hcibridge
   echo \"installed: \$(hcibridge --version)\"

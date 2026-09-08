@@ -8,9 +8,9 @@ if [ $# -ge 1 ]; then
 
 # Packages are signed. Without the release key a throwaway one is made, and
 # apk on the user's machine will call the result untrusted.
-if [ ! -f packaging/keys/heppu-esp-hci-bridge.rsa ]; then
-    echo "no packaging/keys/heppu-esp-hci-bridge.rsa, generating a dev signing key (not the release key)" >&2
-    openssl genrsa -out packaging/keys/heppu-esp-hci-bridge.rsa 2048 2>/dev/null
+if [ ! -f packaging/keys/heppu-hcibridge.rsa ]; then
+    echo "no packaging/keys/heppu-hcibridge.rsa, generating a dev signing key (not the release key)" >&2
+    openssl genrsa -out packaging/keys/heppu-hcibridge.rsa 2048 2>/dev/null
 fi
 if [ ! -f packaging/keys/hcibridge.gpg ]; then
     echo "no packaging/keys/hcibridge.gpg, generating a dev GPG key (not the release key)" >&2

@@ -7,19 +7,19 @@ version=@PKGVER@
 revision=1
 archs="x86_64 aarch64"
 create_wrksrc=yes
-build_wrksrc="esp-hci-bridge-${version}"
+build_wrksrc="hcibridge-${version}"
 depends="bluez"
 short_desc="Attach remote ESP32 Bluetooth bridges to the local Bluetooth stack"
 maintainer="Henri Koski <henri.koski@bitbrewers.fi>"
 license="MIT"
-homepage="https://github.com/heppu/esp-hci-bridge"
+homepage="https://github.com/heppu/hcibridge"
 _zigver=0.16.0
 case "$XBPS_MACHINE" in
 	x86_64) _zigsum=70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00 ;;
 	aarch64) _zigsum=ea4b09bfb22ec6f6c6ceac57ab63efb6b46e17ab08d21f69f3a48b38e1534f17 ;;
 esac
 _zig="zig-${XBPS_MACHINE}-linux-${_zigver}"
-distfiles="https://github.com/heppu/esp-hci-bridge/archive/refs/tags/v${version}.tar.gz
+distfiles="https://github.com/heppu/hcibridge/archive/refs/tags/v${version}.tar.gz
  https://ziglang.org/download/${_zigver}/${_zig}.tar.xz"
 checksum="@SHA256@
  ${_zigsum}"

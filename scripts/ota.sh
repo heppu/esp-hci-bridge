@@ -3,7 +3,7 @@
 # Usage: scripts/ota.sh <ip|host> [image.bin]
 set -eu
 HOST=$1
-IMG=${2:-$(dirname "$0")/../firmware/build-${BOARD:-olimex-esp32-poe}/esp-hci-bridge.bin}
+IMG=${2:-$(dirname "$0")/../firmware/build-${BOARD:-olimex-esp32-poe}/hcibridge.bin}
 echo "before: $(curl -s "http://$HOST/")"
 curl -sS --fail -X POST --data-binary "@$IMG" -H 'Content-Type: application/octet-stream' "http://$HOST/ota"
 echo "waiting for reboot"
