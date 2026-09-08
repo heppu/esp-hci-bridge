@@ -11,6 +11,31 @@ const Io = std.Io;
 
 const log = std.log.scoped(.config);
 
+pub const default_path = "/etc/hcibridge/hcibridge.conf";
+/// The layout before the rename. Used when it exists and the new path does
+/// not, so an upgrade keeps the board keys in <config>.d working. Goes at 1.1.0.
+pub const legacy_path = "/etc/hcibridge/config";
+
+fn exists(io: Io, path: []const u8) bool {
+    const f = Io.Dir.cwd().openFile(io, path, .{ .mode = .read_only }) catch return false;
+    f.close(io);
+    return true;
+}
+
+/// Config path to use when the caller passed no --config.
+pub fn defaultPath(io: Io) []const u8 {
+    return choosePath(io, default_path, legacy_path);
+}
+
+fn choosePath(io: Io, new: []const u8, old: []const u8) []const u8 {
+    if (exists(io, new)) return new;
+    if (exists(io, old)) {
+        log.warn("{s} is the old config path, rename it to {s} (and {s}.d to {s}.d)", .{ old, new, old, new });
+        return old;
+    }
+    return new;
+}
+
 pub const Pair = struct {
     key: []const u8,
     value: []const u8,
@@ -183,4 +208,23 @@ test "drop-ins include regular files and symlinks, unreadable ones are skipped" 
     try testing.expectEqualStrings("b", r.pairs.items[2].key);
     try testing.expectEqualStrings("2", r.pairs.items[2].value);
     try testing.expect(std.mem.endsWith(u8, r.pairs.items[2].source, "20-b.conf"));
+}
+
+test "the old config path is used only when the new one is absent" {
+    const io = testing.io;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var pbuf: [std.fs.max_path_bytes]u8 = undefined;
+    const n = try tmp.dir.realPath(io, &pbuf);
+    const dir = pbuf[0..n];
+    var nbuf: [std.fs.max_path_bytes]u8 = undefined;
+    var obuf: [std.fs.max_path_bytes]u8 = undefined;
+    const new = try std.fmt.bufPrint(&nbuf, "{s}/hcibridge.conf", .{dir});
+    const old = try std.fmt.bufPrint(&obuf, "{s}/config", .{dir});
+
+    try testing.expectEqualStrings(new, choosePath(io, new, old));
+    try tmp.dir.writeFile(io, .{ .sub_path = "config", .data = "port = 1\n" });
+    try testing.expectEqualStrings(old, choosePath(io, new, old));
+    try tmp.dir.writeFile(io, .{ .sub_path = "hcibridge.conf", .data = "port = 2\n" });
+    try testing.expectEqualStrings(new, choosePath(io, new, old));
 }

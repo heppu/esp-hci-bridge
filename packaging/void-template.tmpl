@@ -23,7 +23,7 @@ distfiles="https://github.com/heppu/hcibridge/archive/refs/tags/v${version}.tar.
  https://ziglang.org/download/${_zigver}/${_zig}.tar.xz"
 checksum="@SHA256@
  ${_zigsum}"
-conf_files="/etc/hcibridge/config /etc/hcibridge/config.d/50-example.conf /etc/hcibridge.conf"
+conf_files="/etc/hcibridge/hcibridge.conf /etc/hcibridge/hcibridge.conf.d/50-example.conf /etc/sv/hcibridge/conf"
 
 do_build() {
 	export ZIG_GLOBAL_CACHE_DIR="${wrksrc}/zig-cache"
@@ -42,12 +42,12 @@ do_install() {
 	vcompletion zig-out/gen/hcibridge.bash bash
 	vcompletion zig-out/gen/_hcibridge zsh
 	vcompletion zig-out/gen/hcibridge.fish fish
-	vinstall host/config/config 644 etc/hcibridge config
-	vinstall host/config/config.d/50-example.conf 644 etc/hcibridge/config.d 50-example.conf
-	vinstall host/hcibridge.conf 644 etc hcibridge.conf
+	vinstall host/config/hcibridge.conf 644 etc/hcibridge hcibridge.conf
+	vinstall host/config/hcibridge.conf.d/50-example.conf 644 etc/hcibridge/hcibridge.conf.d 50-example.conf
 	vinstall host/modules-load.conf 644 usr/lib/modules-load.d hci_vhci.conf
 	vmkdir etc/sv/hcibridge/log
 	install -m755 host/runit/hcibridge/run "${DESTDIR}/etc/sv/hcibridge/run"
+	install -m644 host/runit/hcibridge/conf "${DESTDIR}/etc/sv/hcibridge/conf"
 	# Void logs through vlogger, the generic runit dir in the repo uses svlogd
 	printf '#!/bin/sh\nexec vlogger -t hcibridge\n' > "${DESTDIR}/etc/sv/hcibridge/log/run"
 	chmod 755 "${DESTDIR}/etc/sv/hcibridge/log/run"

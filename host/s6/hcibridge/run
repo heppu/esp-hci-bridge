@@ -1,5 +1,5 @@
 #!/bin/sh
 exec 2>&1
 modprobe hci_vhci 2>/dev/null || true
-[ -f /etc/hcibridge.conf ] && . /etc/hcibridge.conf
-exec /usr/bin/hcibridge run $BRIDGE_ARGS
+[ -r conf ] && . ./conf
+exec /usr/bin/hcibridge run ${OPTS}

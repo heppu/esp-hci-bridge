@@ -11,8 +11,6 @@ const config = @import("config.zig");
 const settings = @import("settings.zig");
 const X25519 = std.crypto.dh.X25519;
 
-pub const default_config = "/etc/hcibridge/config";
-
 fn envGet(ctx: ?*anyopaque, name: []const u8) ?[]const u8 {
     const env: *const std.process.Environ = @ptrCast(@alignCast(ctx.?));
     return env.getPosix(name);
@@ -257,7 +255,7 @@ fn updateOne(io: Io, gpa: std.mem.Allocator, u: *ui.Ui, addr: *const Io.net.IpAd
     bar.finish(image.len);
     if (r.status != 200) {
         const hint: []const u8 = switch (r.status) {
-            401, 403 => "the key on this PC does not match the board, run `hcibridge claim` again or check /etc/hcibridge/config.d",
+            401, 403 => "the key on this PC does not match the board, run `hcibridge claim` again or check /etc/hcibridge/hcibridge.conf.d",
             413 => "the image is larger than the board's firmware partition",
             else => "",
         };

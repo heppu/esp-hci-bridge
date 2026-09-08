@@ -203,8 +203,8 @@ unplugging it removes one. Put a board in every room where you want Bluetooth.
 
 ## Configuration
 
-The defaults work for a home network. Settings live in `/etc/hcibridge/config`
-with drop-ins in `/etc/hcibridge/config.d/`. Every setting can also be an
+The defaults work for a home network. Settings live in `/etc/hcibridge/hcibridge.conf`
+with drop-ins in `/etc/hcibridge/hcibridge.conf.d/`. Every setting can also be an
 environment variable or a command line flag, and those win in that order:
 
 ```
