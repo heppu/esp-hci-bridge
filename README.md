@@ -78,11 +78,10 @@ the terminal.
 
 ### 2. Install on the PC
 
-Download the package for your distro from the
-[latest release](https://github.com/heppu/esp-hci-bridge/releases/latest):
-
-Every distro gets a signed package repository, so the normal upgrade command
-keeps the tool current afterwards.
+One package per distro, each from a signed repository, so the normal upgrade
+command keeps the tool current afterwards. Every package installs a background
+service that starts on boot and finds boards on its own, except on Arch where
+services are never started by packages.
 
 Alpine:
 
@@ -90,6 +89,13 @@ Alpine:
 sudo wget -O /etc/apk/keys/heppu-esp-hci-bridge.rsa.pub https://heppu.github.io/esp-hci-bridge/alpine/heppu-esp-hci-bridge.rsa.pub
 echo https://heppu.github.io/esp-hci-bridge/alpine | sudo tee -a /etc/apk/repositories
 sudo apk add hcibridge
+```
+
+Arch:
+
+```sh
+yay -S hcibridge                          # or hcibridge-bin for the prebuilt binary
+sudo systemctl enable --now hcibridge
 ```
 
 Debian, Ubuntu:
@@ -107,15 +113,19 @@ sudo curl -fsSLo /etc/yum.repos.d/hcibridge.repo https://heppu.github.io/esp-hci
 sudo dnf install hcibridge
 ```
 
-Plain package files are on the release page as well, next to a `PKGBUILD` for
-Arch, an `APKBUILD` (needs Alpine edge for its Zig), and a Void template that
-fetches its own Zig. Every release builds all three the way their distro does
-before it is published.
+Void:
 
-Arch: `yay -S hcibridge` from the AUR, then `sudo systemctl enable --now
-hcibridge`, Arch packages do not start services on their own. Every other
-package installs a background service that starts on boot and finds boards on
-its own.
+```sh
+curl -fsSLo srcpkgs/hcibridge/template https://github.com/heppu/esp-hci-bridge/releases/latest/download/void-template   # in a void-packages checkout
+./xbps-src pkg hcibridge && sudo xbps-install --repository hostdir/binpkgs hcibridge
+sudo ln -s /etc/sv/hcibridge /var/service/
+```
+
+Anything else: the static binaries, man page, and completions are on the
+[release page](https://github.com/heppu/esp-hci-bridge/releases/latest), and
+`sudo scripts/install-host-service.sh` from a checkout sets up the service for
+systemd, OpenRC, runit, or s6. Every release builds the Arch, Alpine, and Void
+recipes the way their distro does before it is published.
 
 ### 3. Claim the board
 
