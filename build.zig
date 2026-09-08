@@ -1,4 +1,5 @@
 const std = @import("std");
+const zon = @import("build.zig.zon");
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
@@ -22,7 +23,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    const version = b.option([]const u8, "version", "version string baked into the binary") orelse "dev";
+    const version = b.option([]const u8, "version", "version string baked into the binary") orelse "v" ++ zon.version;
     const options = b.addOptions();
     options.addOption([]const u8, "version", version);
     const build_options = options.createModule();

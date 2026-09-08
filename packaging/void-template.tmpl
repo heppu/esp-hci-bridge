@@ -27,8 +27,8 @@ conf_files="/etc/hcibridge/config /etc/hcibridge/config.d/50-example.conf /etc/h
 
 do_build() {
 	export ZIG_GLOBAL_CACHE_DIR="${wrksrc}/zig-cache"
-	"${wrksrc}/${_zig}/zig" build -Doptimize=ReleaseSafe "-Dtarget=${XBPS_TARGET_MACHINE}-linux-musl" "-Dversion=v${version}"
-	"${wrksrc}/${_zig}/zig" build gen "-Dversion=v${version}"
+	"${wrksrc}/${_zig}/zig" build -Doptimize=ReleaseSafe "-Dtarget=${XBPS_TARGET_MACHINE}-linux-musl"
+	"${wrksrc}/${_zig}/zig" build gen
 }
 
 do_install() {

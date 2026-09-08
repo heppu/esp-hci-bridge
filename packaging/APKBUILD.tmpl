@@ -15,8 +15,8 @@ builddir="$srcdir/hcibridge-$pkgver"
 sha512sums="@SHA512@  $pkgname-$pkgver.tar.gz"
 
 build() {
-	zig build -Doptimize=ReleaseSafe "-Dversion=v$pkgver"
-	zig build gen "-Dversion=v$pkgver"
+	zig build -Doptimize=ReleaseSafe
+	zig build gen
 }
 
 package() {
