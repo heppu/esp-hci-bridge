@@ -18,6 +18,11 @@ build() {
     zig build gen
 }
 
+check() {
+    cd "hcibridge-$pkgver"
+    zig build test
+}
+
 package() {
     cd "hcibridge-$pkgver"
     install -Dm755 zig-out/bin/hcibridge "$pkgdir/usr/bin/hcibridge"
