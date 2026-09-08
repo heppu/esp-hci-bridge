@@ -9,7 +9,7 @@ license=('MIT')
 depends=('bluez')
 provides=('hcibridge')
 conflicts=('hcibridge')
-backup=('etc/hcibridge/config' 'etc/hcibridge/config.d/50-example.conf' 'etc/default/hcibridge')
+backup=('etc/hcibridge/hcibridge.conf' 'etc/hcibridge/hcibridge.conf.d/50-example.conf' 'etc/default/hcibridge')
 _rel="https://github.com/heppu/hcibridge/releases/download/v$pkgver"
 source=("hcibridge-$pkgver.tar.gz::https://github.com/heppu/hcibridge/archive/refs/tags/v$pkgver.tar.gz"
         "hcibridge.1-$pkgver::$_rel/hcibridge.1"
@@ -34,7 +34,7 @@ package() {
     install -Dm644 "$src/host/systemd/hcibridge.service" "$pkgdir/usr/lib/systemd/system/hcibridge.service"
     install -Dm644 "$src/host/systemd/hcibridge.env" "$pkgdir/etc/default/hcibridge"
     install -Dm644 "$src/host/modules-load.conf" "$pkgdir/usr/lib/modules-load.d/hci_vhci.conf"
-    install -Dm644 "$src/host/config/config" "$pkgdir/etc/hcibridge/config"
-    install -Dm644 "$src/host/config/config.d/50-example.conf" "$pkgdir/etc/hcibridge/config.d/50-example.conf"
+    install -Dm644 "$src/host/config/hcibridge.conf" "$pkgdir/etc/hcibridge/hcibridge.conf"
+    install -Dm644 "$src/host/config/hcibridge.conf.d/50-example.conf" "$pkgdir/etc/hcibridge/hcibridge.conf.d/50-example.conf"
     install -Dm644 "$src/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

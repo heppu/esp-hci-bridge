@@ -25,11 +25,11 @@ contents:
     dst: /usr/share/fish/vendor_completions.d/hcibridge.fish
   - src: zig-out/gen/hcibridge.1
     dst: /usr/share/man/man1/hcibridge.1
-  - src: host/config/config
-    dst: /etc/hcibridge/config
+  - src: host/config/hcibridge.conf
+    dst: /etc/hcibridge/hcibridge.conf
     type: config|noreplace
-  - src: host/config/config.d/50-example.conf
-    dst: /etc/hcibridge/config.d/50-example.conf
+  - src: host/config/hcibridge.conf.d/50-example.conf
+    dst: /etc/hcibridge/hcibridge.conf.d/50-example.conf
     type: config|noreplace
   - src: host/modules-load.conf
     dst: /usr/lib/modules-load.d/hci_vhci.conf

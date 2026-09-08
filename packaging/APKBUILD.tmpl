@@ -25,8 +25,8 @@ package() {
 	install -Dm644 "$builddir"/zig-out/gen/hcibridge.bash "$pkgdir"/usr/share/bash-completion/completions/hcibridge
 	install -Dm644 "$builddir"/zig-out/gen/_hcibridge "$pkgdir"/usr/share/zsh/site-functions/_hcibridge
 	install -Dm644 "$builddir"/zig-out/gen/hcibridge.fish "$pkgdir"/usr/share/fish/vendor_completions.d/hcibridge.fish
-	install -Dm644 "$builddir"/host/config/config "$pkgdir"/etc/hcibridge/config
-	install -Dm644 "$builddir"/host/config/config.d/50-example.conf "$pkgdir"/etc/hcibridge/config.d/50-example.conf
+	install -Dm644 "$builddir"/host/config/hcibridge.conf "$pkgdir"/etc/hcibridge/hcibridge.conf
+	install -Dm644 "$builddir"/host/config/hcibridge.conf.d/50-example.conf "$pkgdir"/etc/hcibridge/hcibridge.conf.d/50-example.conf
 	install -Dm644 "$builddir"/host/modules-load.conf "$pkgdir"/usr/lib/modules-load.d/hci_vhci.conf
 	install -Dm755 "$builddir"/host/openrc/hcibridged "$pkgdir"/etc/init.d/hcibridged
 	install -Dm644 "$builddir"/host/openrc/hcibridged.confd "$pkgdir"/etc/conf.d/hcibridged

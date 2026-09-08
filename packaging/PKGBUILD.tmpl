@@ -8,7 +8,7 @@ url="https://github.com/heppu/hcibridge"
 license=('MIT')
 depends=('bluez')
 makedepends=('zig')
-backup=('etc/hcibridge/config' 'etc/hcibridge/config.d/50-example.conf' 'etc/default/hcibridge')
+backup=('etc/hcibridge/hcibridge.conf' 'etc/hcibridge/hcibridge.conf.d/50-example.conf' 'etc/default/hcibridge')
 source=("$pkgname-$pkgver.tar.gz::https://github.com/heppu/hcibridge/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('@SHA256@')
 
@@ -28,7 +28,7 @@ package() {
     install -Dm644 host/systemd/hcibridge.service "$pkgdir/usr/lib/systemd/system/hcibridge.service"
     install -Dm644 host/systemd/hcibridge.env "$pkgdir/etc/default/hcibridge"
     install -Dm644 host/modules-load.conf "$pkgdir/usr/lib/modules-load.d/hci_vhci.conf"
-    install -Dm644 host/config/config "$pkgdir/etc/hcibridge/config"
-    install -Dm644 host/config/config.d/50-example.conf "$pkgdir/etc/hcibridge/config.d/50-example.conf"
+    install -Dm644 host/config/hcibridge.conf "$pkgdir/etc/hcibridge/hcibridge.conf"
+    install -Dm644 host/config/hcibridge.conf.d/50-example.conf "$pkgdir/etc/hcibridge/hcibridge.conf.d/50-example.conf"
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

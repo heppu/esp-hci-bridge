@@ -87,7 +87,7 @@ pub fn main(init: std.process.Init) !u8 {
             log.err("usage: hcibridge claim <ip> [--config <path>]", .{});
             return 2;
         };
-        var cfg: []const u8 = cli.default_config;
+        var cfg: []const u8 = config.defaultPath(io);
         while (it.next()) |a| if (std.mem.eql(u8, a, "--config")) {
             cfg = it.next() orelse return error.MissingValue;
         };
@@ -98,7 +98,7 @@ pub fn main(init: std.process.Init) !u8 {
             log.err("usage: hcibridge unclaim <ip> [--config <path>]", .{});
             return 2;
         };
-        var cfg: []const u8 = cli.default_config;
+        var cfg: []const u8 = config.defaultPath(io);
         while (it.next()) |a| if (std.mem.eql(u8, a, "--config")) {
             cfg = it.next() orelse return error.MissingValue;
         };
@@ -109,7 +109,7 @@ pub fn main(init: std.process.Init) !u8 {
             log.err("usage: hcibridge revoke <bdaddr> [--config <path>]", .{});
             return 2;
         };
-        var cfg: []const u8 = cli.default_config;
+        var cfg: []const u8 = config.defaultPath(io);
         while (it.next()) |a| if (std.mem.eql(u8, a, "--config")) {
             cfg = it.next() orelse return error.MissingValue;
         };
@@ -120,7 +120,7 @@ pub fn main(init: std.process.Init) !u8 {
             log.err("usage: hcibridge reboot <ip> [--config <path>]", .{});
             return 2;
         };
-        var cfg: []const u8 = cli.default_config;
+        var cfg: []const u8 = config.defaultPath(io);
         while (it.next()) |a| if (std.mem.eql(u8, a, "--config")) {
             cfg = it.next() orelse return error.MissingValue;
         };
@@ -141,7 +141,7 @@ pub fn main(init: std.process.Init) !u8 {
         var file: ?[]const u8 = null;
         var preset: ?[]const u8 = null;
         var dport: u16 = disc.default_port;
-        var cfg: []const u8 = cli.default_config;
+        var cfg: []const u8 = config.defaultPath(io);
         while (it.next()) |a| {
             if (std.mem.eql(u8, a, "--discovery-port")) {
                 dport = try std.fmt.parseInt(u16, it.next() orelse return error.MissingValue, 10);
@@ -236,7 +236,7 @@ fn splitHostPort(client: []const u8, default_port: u16) struct { host: []const u
 
 fn runMode(io: Io, gpa: std.mem.Allocator, args: []const []const u8, env_map: *std.process.Environ.Map) !u8 {
     // Config path can be overridden with --config; default is well-known.
-    var cfg_path: []const u8 = "/etc/hcibridge/config";
+    var cfg_path: []const u8 = config.defaultPath(io);
     var k: usize = 0;
     while (k < args.len) : (k += 1) {
         if (std.mem.eql(u8, args[k], "--config")) {
